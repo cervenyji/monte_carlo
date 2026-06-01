@@ -26,11 +26,27 @@ df["effective_date"] = pd.to_datetime(df["effective_date"])
 df_bns = df[df["bns_flag"] == "Y"].copy()
 df_bns = df_bns.sort_values(["branch_code", "effective_date"])
 
+has_nf_cols = ("branch_building_nf_sf" in df_bns.columns and "nf_number" in df_bns.columns)
+
 # =========================================================
 # ČÁST A — Měsíční snapshoty + aktuální stav
 # =========================================================
 df_bns["year_month"] = df_bns["effective_date"].dt.to_period("M")
 all_months = sorted(df_bns["year_month"].unique())
+
+def is_new_format_mask(df_sub):
+    """Maska pro pobočky splňující podmínky nového formátu:
+    branch_building_nf_sf == 'NF'  AND  format vyplnněný  AND  nf_number je číslo."""
+    if not has_nf_cols:
+        return df_sub["format"].notna() & (df_sub["format"].astype(str).str.strip() != "")
+    nf_sf_ok = df_sub["branch_building_nf_sf"].astype(str).str.strip() == "NF"
+    fmt_ok = (
+        df_sub["format"].notna() &
+        (df_sub["format"].astype(str).str.strip() != "") &
+        (df_sub["format"].astype(str).str.strip() != "nan")
+    )
+    nf_num_ok = pd.to_numeric(df_sub["nf_number"], errors="coerce").notna()
+    return nf_sf_ok & fmt_ok & nf_num_ok
 
 def build_snapshot(cutoff_date, label, is_current=False):
     mask = df_bns["effective_date"] <= cutoff_date
@@ -49,9 +65,7 @@ def build_snapshot(cutoff_date, label, is_current=False):
     cashless = snap[(~snap["branch_closed"]) & (snap["cashless"] == True)].shape[0]
     non_cashless = opened - cashless
     open_branches = snap[~snap["branch_closed"]]
-    new_format = open_branches[
-        (open_branches["format"].notna()) & (open_branches["format"] != "")
-    ].shape[0]
+    new_format = int(is_new_format_mask(open_branches).sum())
     old_format = opened - new_format
     return {
         "timestamp": cutoff_date.strftime("%Y-%m-%d"),
@@ -125,7 +139,7 @@ print(f"📊 Agregace: M={len(history_monthly)}, Q={len(history_quarterly)}, Y={
 # =========================================================
 tracked_cols = [
     "branch_name", "branch_type", "branch_closed", "cashless",
-    "format", "address", "city", "region"
+    "format", "branch_building_nf_sf", "nf_number", "address", "city", "region"
 ]
 tracked_cols = [c for c in tracked_cols if c in df_bns.columns]
 
@@ -183,7 +197,6 @@ for code, grp in df_bns.groupby("branch_code"):
     branches_data[int(code)] = {"code": int(code), "name": branch_name, "events": events, "total_changes": len(events) - 1}
 
 sorted_branches = sorted(branches_data.values(), key=lambda b: b["code"])
-
 print(f"✅ Připraveno {len(sorted_branches)} poboček pro timeline")
 
 # =========================================================
@@ -191,18 +204,14 @@ print(f"✅ Připraveno {len(sorted_branches)} poboček pro timeline")
 # =========================================================
 def categorize_change(field, old_val, new_val):
     if field == "cashless":
-        if new_val is True:
-            return ("cashless", "Přechod na cashless")
-        elif new_val is False:
-            return ("cashless", "Vrácena hotovost")
+        if new_val is True: return ("cashless", "Přechod na cashless")
+        elif new_val is False: return ("cashless", "Vrácena hotovost")
     elif field == "format":
         if new_val and str(new_val) not in ("", "nan", "None"):
             return ("format", f"Nový formát: {new_val}")
     elif field == "branch_closed":
-        if new_val is True:
-            return ("closed", "Pobočka zavřena")
-        elif new_val is False:
-            return ("closed", "Pobočka znovu otevřena")
+        if new_val is True: return ("closed", "Pobočka zavřena")
+        elif new_val is False: return ("closed", "Pobočka znovu otevřena")
     return None
 
 all_changes = []
@@ -227,7 +236,6 @@ for code, bdata in branches_data.items():
             })
 
 all_changes.sort(key=lambda x: (x["date"], -x["branch_code"]), reverse=True)
-
 recent_changes_by_cat = {
     "all": all_changes[:10],
     "cashless": [c for c in all_changes if c["category"] == "cashless"][:10],
@@ -235,32 +243,51 @@ recent_changes_by_cat = {
     "closed": [c for c in all_changes if c["category"] == "closed"][:10],
 }
 
-print(f"🔔 Změny připraveny: "
-      f"all={len(recent_changes_by_cat['all'])}, "
-      f"cashless={len(recent_changes_by_cat['cashless'])}, "
-      f"format={len(recent_changes_by_cat['format'])}, "
-      f"closed={len(recent_changes_by_cat['closed'])}")
+print(f"🔔 Změny připraveny: all={len(recent_changes_by_cat['all'])}, cashless={len(recent_changes_by_cat['cashless'])}, format={len(recent_changes_by_cat['format'])}, closed={len(recent_changes_by_cat['closed'])}")
+
+# =========================================================
+# Pomocná funkce — platí nový formát pro daný stav pobočky?
+# branch_building_nf_sf == "NF"  AND  format vyplnněný  AND  nf_number je číslo
+# =========================================================
+def is_new_format_state(state):
+    nf_sf  = state.get("branch_building_nf_sf")
+    fmt    = state.get("format")
+    nf_num = state.get("nf_number")
+    if not has_nf_cols:
+        return fmt is not None and str(fmt).strip() not in ("", "nan", "None")
+    nf_sf_ok = nf_sf is not None and str(nf_sf).strip() == "NF"
+    fmt_ok   = fmt is not None and str(fmt).strip() not in ("", "nan", "None")
+    nf_num_ok = False
+    if nf_num is not None:
+        try:
+            float(str(nf_num).strip())
+            nf_num_ok = True
+        except (ValueError, TypeError):
+            pass
+    return nf_sf_ok and fmt_ok and nf_num_ok
 
 # =========================================================
 # ČÁST C — Měsíční přírůstky poboček s novým formátem
+# Sledujeme přechod stavu: nebyl NF → je NF (všechny 3 podmínky splněny)
 # =========================================================
 format_transitions = []
 for code, bdata in branches_data.items():
-    for evt in bdata["events"]:
-        if evt["type"] == "initial":
-            continue
-        for ch in evt["changes"]:
-            if ch["field"] == "format":
-                old_empty = ch["old"] is None or str(ch["old"]).strip() in ("", "nan", "None")
-                new_nonempty = ch["new"] is not None and str(ch["new"]).strip() not in ("", "nan", "None")
-                if old_empty and new_nonempty:
-                    format_transitions.append({
-                        "date": evt["date"],
-                        "month": evt["date"][:7],
-                        "branch_code": int(code),
-                        "branch_name": bdata["name"],
-                        "format_new": str(ch["new"]),
-                    })
+    events = bdata["events"]
+    for i, evt in enumerate(events):
+        if i == 0:
+            continue  # přeskočíme počáteční stav
+        prev_nf = is_new_format_state(events[i - 1]["state"])
+        curr_nf = is_new_format_state(evt["state"])
+        if not prev_nf and curr_nf:
+            curr_state = evt["state"]
+            format_transitions.append({
+                "date": evt["date"],
+                "month": evt["date"][:7],
+                "branch_code": int(code),
+                "branch_name": bdata["name"],
+                "format_new": str(curr_state.get("format", "")),
+                "nf_number": str(curr_state.get("nf_number", "")),
+            })
 
 format_transitions.sort(key=lambda x: (x["date"], x["branch_code"]))
 
@@ -278,7 +305,7 @@ for m in all_fmt_months:
         "branches": branches_list,
     })
 
-print(f"🎨 Přechody na nový formát: {len(format_transitions)} celkem, {len(format_monthly_summary)} měsíců")
+print(f"🎨 Přechody na nový formát (NF+format+nf_number): {len(format_transitions)} celkem, {len(format_monthly_summary)} měsíců")
 
 # =========================================================
 # STAŽENÍ APEXCHARTS — embed do HTML (funguje offline/file://)
@@ -296,11 +323,7 @@ except Exception as _e:
 # GENEROVÁNÍ JEDNOHO HTML
 # =========================================================
 history_json = json.dumps(history, ensure_ascii=False)
-history_all_json = json.dumps({
-    "M": history_monthly,
-    "Q": history_quarterly,
-    "Y": history_yearly,
-}, ensure_ascii=False)
+history_all_json = json.dumps({"M": history_monthly, "Q": history_quarterly, "Y": history_yearly}, ensure_ascii=False)
 branches_json = json.dumps(sorted_branches, ensure_ascii=False)
 recent_changes_json = json.dumps(recent_changes_by_cat, ensure_ascii=False)
 format_monthly_json = json.dumps(format_monthly_summary, ensure_ascii=False)
@@ -321,404 +344,178 @@ html = f"""<!DOCTYPE html>
 {apex_script_tag}
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,700&family=JetBrains+Mono:wght@400;600&display=swap');
-
   :root {{
-    --bg: #f3f5f9;
-    --card: #ffffff;
-    --text: #1e2330;
-    --muted: #64748b;
-    --dim: #9ca3b0;
-    --border: #dfe2ea;
-    --border-lt: #eceef4;
-    --accent: #0057b8;
-    --accent-lt: #e8f0fe;
-    --green: #059669;
-    --green-bg: #ecfdf5;
-    --red: #dc2626;
-    --red-bg: #fef2f2;
-    --orange: #d97706;
-    --orange-bg: #fffbeb;
-    --blue: #2563eb;
-    --purple: #7c3aed;
-    --purple-bg: #f5f3ff;
-    --teal: #0d9488;
-    --yellow: #b45309;
-    --yellow-bg: #fefce8;
-    --cyan: #0891b2;
-    --cyan-bg: #ecfeff;
+    --bg:#f3f5f9; --card:#fff; --text:#1e2330; --muted:#64748b; --dim:#9ca3b0;
+    --border:#dfe2ea; --border-lt:#eceef4; --accent:#0057b8; --accent-lt:#e8f0fe;
+    --green:#059669; --green-bg:#ecfdf5; --red:#dc2626; --red-bg:#fef2f2;
+    --orange:#d97706; --orange-bg:#fffbeb; --blue:#2563eb; --purple:#7c3aed;
+    --purple-bg:#f5f3ff; --teal:#0d9488; --yellow:#b45309; --yellow-bg:#fefce8;
+    --cyan:#0891b2; --cyan-bg:#ecfeff;
   }}
+  * {{ margin:0; padding:0; box-sizing:border-box; }}
+  body {{ font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }}
 
-  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  .tab-nav {{ display:flex; align-items:center; background:var(--card); border-bottom:1px solid var(--border); padding:0 32px; position:sticky; top:0; z-index:100; }}
+  .tab-nav .brand {{ font-weight:700; font-size:0.95rem; color:var(--accent); padding:14px 24px 14px 0; border-right:1px solid var(--border); margin-right:4px; white-space:nowrap; }}
+  .tab-btn {{ padding:14px 22px; background:none; border:none; border-bottom:2px solid transparent; font-family:'DM Sans',sans-serif; font-size:0.85rem; font-weight:500; color:var(--muted); cursor:pointer; transition:all 0.2s; }}
+  .tab-btn:hover {{ color:var(--text); }}
+  .tab-btn.active {{ color:var(--accent); border-bottom-color:var(--accent); font-weight:700; }}
+  .tab-content {{ display:none; }}
+  .tab-content.active {{ display:block; }}
 
-  body {{
-    font-family: 'DM Sans', sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    min-height: 100vh;
-  }}
+  #tabOverview {{ padding:28px 32px; max-width:1200px; margin:0 auto; }}
+  .ov-header {{ text-align:center; margin-bottom:28px; }}
+  .ov-header h1 {{ font-size:1.4rem; color:var(--accent); margin-bottom:4px; }}
+  .ov-header p {{ color:var(--muted); font-size:0.85rem; }}
+  .ov-header .range {{ display:inline-block; margin-top:8px; background:var(--accent-lt); color:var(--accent); padding:4px 14px; border-radius:20px; font-size:0.78rem; font-weight:600; }}
 
-  .tab-nav {{
-    display: flex;
-    align-items: center;
-    gap: 0;
-    background: var(--card);
-    border-bottom: 1px solid var(--border);
-    padding: 0 32px;
-    position: sticky;
-    top: 0;
-    z-index: 100;
-  }}
+  .kpi-row {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; margin-bottom:24px; }}
+  .kpi {{ background:var(--card); border-radius:10px; padding:14px; text-align:center; box-shadow:0 1px 3px rgba(0,0,0,.05); border-top:3px solid transparent; }}
+  .kpi .value {{ font-size:1.6rem; font-weight:700; line-height:1.2; }}
+  .kpi .label {{ font-size:0.75rem; color:var(--muted); margin-top:3px; }}
+  .kpi .delta {{ font-size:0.72rem; margin-top:2px; }}
+  .delta.up {{ color:var(--green); }}
+  .delta.down {{ color:var(--red); }}
+  .delta.neutral {{ color:var(--muted); }}
 
-  .tab-nav .brand {{
-    font-weight: 700;
-    font-size: 0.95rem;
-    color: var(--accent);
-    padding: 14px 24px 14px 0;
-    border-right: 1px solid var(--border);
-    margin-right: 4px;
-    white-space: nowrap;
-  }}
+  .chart-card {{ background:var(--card); border-radius:10px; padding:18px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,.05); }}
+  .chart-card h2 {{ font-size:0.95rem; margin-bottom:2px; }}
+  .chart-card .sub {{ font-size:0.78rem; color:var(--muted); margin-bottom:10px; }}
 
-  .tab-btn {{
-    padding: 14px 22px;
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 0.85rem;
-    font-weight: 500;
-    color: var(--muted);
-    cursor: pointer;
-    transition: all 0.2s;
-  }}
+  .rc-tabs {{ display:flex; gap:4px; background:var(--bg); padding:3px; border-radius:8px; border:1px solid var(--border); }}
+  .rc-tab {{ padding:5px 12px; background:transparent; border:none; border-radius:5px; font-family:'DM Sans',sans-serif; font-size:0.72rem; font-weight:500; color:var(--muted); cursor:pointer; transition:all .15s; }}
+  .rc-tab:hover {{ color:var(--text); }}
+  .rc-tab.active {{ background:var(--card); color:var(--accent); font-weight:700; box-shadow:0 1px 2px rgba(0,0,0,.06); }}
 
-  .tab-btn:hover {{ color: var(--text); }}
+  .rc-item {{ display:flex; align-items:flex-start; gap:12px; padding:10px 0; border-bottom:1px solid var(--border-lt); }}
+  .rc-item:last-child {{ border-bottom:none; }}
+  .rc-dot {{ width:10px; height:10px; border-radius:50%; margin-top:6px; flex-shrink:0; border:2px solid var(--border); background:var(--card); }}
+  .rc-dot.closed {{ background:var(--red); border-color:var(--red); }}
+  .rc-dot.reopened {{ background:var(--green); border-color:var(--green); }}
+  .rc-dot.cashless {{ background:var(--orange); border-color:var(--orange); }}
+  .rc-dot.cash_added {{ background:var(--cyan); border-color:var(--cyan); }}
+  .rc-dot.format,.rc-dot.format_change {{ background:var(--purple); border-color:var(--purple); }}
+  .rc-dot.change {{ background:var(--yellow); border-color:var(--yellow); }}
+  .rc-body {{ flex:1; }}
+  .rc-top {{ display:flex; gap:10px; align-items:baseline; font-size:0.8rem; margin-bottom:4px; flex-wrap:wrap; }}
+  .rc-date {{ font-family:'JetBrains Mono',monospace; font-size:0.7rem; color:var(--dim); }}
+  .rc-code {{ font-family:'JetBrains Mono',monospace; color:var(--accent); font-weight:600; font-size:0.72rem; background:var(--accent-lt); padding:1px 7px; border-radius:4px; }}
+  .rc-bname {{ font-weight:600; font-size:0.82rem; }}
+  .rc-evlabel {{ font-size:0.7rem; color:var(--muted); font-style:italic; }}
+  .rc-change {{ font-size:0.75rem; color:var(--muted); }}
+  .rc-change .fld {{ font-family:'JetBrains Mono',monospace; font-size:0.68rem; color:var(--muted); margin-right:6px; }}
+  .rc-change .old {{ color:var(--red); background:var(--red-bg); padding:1px 6px; border-radius:3px; text-decoration:line-through; font-size:0.7rem; }}
+  .rc-change .arr {{ color:var(--dim); margin:0 4px; }}
+  .rc-change .new {{ color:var(--green); background:var(--green-bg); padding:1px 6px; border-radius:3px; font-weight:600; font-size:0.7rem; }}
 
-  .tab-btn.active {{
-    color: var(--accent);
-    border-bottom-color: var(--accent);
-    font-weight: 700;
-  }}
+  .table-wrap {{ background:var(--card); border-radius:10px; padding:18px; box-shadow:0 1px 3px rgba(0,0,0,.05); overflow-x:auto; margin-top:6px; }}
+  .table-wrap h2 {{ font-size:0.95rem; margin-bottom:10px; }}
+  table {{ width:100%; border-collapse:collapse; font-size:0.8rem; }}
+  th,td {{ padding:7px 10px; text-align:right; border-bottom:1px solid var(--border-lt); }}
+  th {{ background:#f8f9fc; color:var(--muted); font-weight:600; position:sticky; top:0; }}
+  th:first-child,td:first-child {{ text-align:left; }}
+  tr:hover td {{ background:#f5f7fb; }}
+  tr.is-current td {{ background:#fffbeb; font-weight:600; }}
+  tr.is-current:hover td {{ background:#fef3c7; }}
 
-  .tab-content {{ display: none; }}
-  .tab-content.active {{ display: block; }}
+  #tabDetail {{ display:none; }}
+  #tabDetail.active {{ display:grid; grid-template-columns:310px 1fr; min-height:calc(100vh - 49px); }}
+  .side {{ background:var(--card); border-right:1px solid var(--border); display:flex; flex-direction:column; height:calc(100vh - 49px); position:sticky; top:49px; }}
+  .side-hdr {{ padding:18px 16px 12px; border-bottom:1px solid var(--border); }}
+  .side-hdr h2 {{ font-size:0.95rem; font-weight:700; color:var(--accent); margin-bottom:2px; }}
+  .side-hdr p {{ font-size:0.72rem; color:var(--muted); }}
+  .search-box {{ padding:10px 16px; border-bottom:1px solid var(--border); }}
+  .search-box input {{ width:100%; padding:8px 12px; background:var(--bg); border:1px solid var(--border); border-radius:7px; color:var(--text); font-family:'DM Sans',sans-serif; font-size:0.82rem; outline:none; transition:border-color .2s; }}
+  .search-box input::placeholder {{ color:var(--dim); }}
+  .search-box input:focus {{ border-color:var(--accent); }}
+  .flt-bar {{ padding:8px 16px; border-bottom:1px solid var(--border); display:flex; gap:5px; flex-wrap:wrap; }}
+  .flt-btn {{ padding:3px 10px; border-radius:14px; border:1px solid var(--border); background:transparent; color:var(--muted); font-family:'DM Sans',sans-serif; font-size:0.69rem; font-weight:500; cursor:pointer; transition:all .15s; }}
+  .flt-btn:hover {{ border-color:var(--accent); color:var(--accent); }}
+  .flt-btn.active {{ background:var(--accent-lt); border-color:var(--accent); color:var(--accent); font-weight:600; }}
+  .list-cnt {{ padding:5px 16px; font-size:0.69rem; color:var(--dim); border-bottom:1px solid var(--border-lt); background:var(--bg); }}
+  .b-list {{ flex:1; overflow-y:auto; }}
+  .b-list::-webkit-scrollbar {{ width:4px; }}
+  .b-list::-webkit-scrollbar-thumb {{ background:var(--border); border-radius:3px; }}
+  .b-item {{ padding:9px 16px; cursor:pointer; transition:all .1s; border-left:3px solid transparent; border-bottom:1px solid var(--border-lt); }}
+  .b-item:hover {{ background:var(--bg); }}
+  .b-item.active {{ background:var(--accent-lt); border-left-color:var(--accent); }}
+  .b-item .code {{ font-family:'JetBrains Mono',monospace; font-size:0.7rem; color:var(--accent); font-weight:600; }}
+  .b-item .name {{ font-size:0.8rem; margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
+  .b-item .meta {{ font-size:0.67rem; color:var(--dim); margin-top:2px; display:flex; gap:7px; align-items:center; }}
+  .b-item .badge {{ background:var(--bg); padding:1px 6px; border-radius:8px; font-weight:600; font-size:0.65rem; border:1px solid var(--border); }}
+  .sdot {{ width:6px; height:6px; border-radius:50%; display:inline-block; }}
+  .sdot.open {{ background:var(--green); }}
+  .sdot.closed {{ background:var(--red); }}
+  .detail {{ padding:28px 32px; overflow-y:auto; height:calc(100vh - 49px); }}
+  .empty-st {{ display:flex; flex-direction:column; align-items:center; justify-content:center; height:50vh; color:var(--dim); }}
+  .empty-st .arr {{ font-size:2rem; margin-bottom:10px; opacity:.3; }}
 
-  #tabOverview {{
-    padding: 28px 32px;
-    max-width: 1200px;
-    margin: 0 auto;
-  }}
+  .br-hdr {{ margin-bottom:24px; padding-bottom:18px; border-bottom:1px solid var(--border); }}
+  .br-hdr .top {{ display:flex; align-items:baseline; gap:12px; margin-bottom:6px; }}
+  .br-hdr .bcode {{ font-family:'JetBrains Mono',monospace; font-size:0.8rem; color:var(--accent); background:var(--accent-lt); padding:3px 10px; border-radius:5px; font-weight:600; }}
+  .br-hdr h2 {{ font-size:1.3rem; font-weight:700; letter-spacing:-.02em; }}
+  .chips {{ display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }}
+  .chip {{ padding:3px 11px; border-radius:14px; font-size:0.7rem; font-weight:600; }}
+  .chip.open {{ background:var(--green-bg); color:var(--green); }}
+  .chip.closed {{ background:var(--red-bg); color:var(--red); }}
+  .chip.cashless {{ background:var(--orange-bg); color:var(--orange); }}
+  .chip.cash {{ background:var(--cyan-bg); color:var(--cyan); }}
+  .chip.nfmt {{ background:var(--purple-bg); color:var(--purple); }}
+  .chip.ofmt {{ background:var(--yellow-bg); color:var(--yellow); }}
+  .sum-txt {{ margin-top:6px; font-size:0.78rem; color:var(--muted); }}
 
-  .ov-header {{
-    text-align: center;
-    margin-bottom: 28px;
-  }}
+  .tl {{ position:relative; padding-left:30px; }}
+  .tl::before {{ content:''; position:absolute; left:11px; top:5px; bottom:5px; width:2px; background:linear-gradient(to bottom,var(--accent),var(--border) 20%,var(--border) 85%,transparent); border-radius:2px; }}
+  .tl-ev {{ position:relative; margin-bottom:18px; animation:fadeUp .22s ease forwards; opacity:0; }}
+  @keyframes fadeUp {{ from {{ opacity:0; transform:translateY(5px); }} to {{ opacity:1; transform:translateY(0); }} }}
+  .tl-ev .dot {{ position:absolute; left:-24px; top:13px; width:9px; height:9px; border-radius:50%; border:2px solid var(--border); background:var(--card); z-index:1; }}
+  .tl-ev.initial .dot {{ background:var(--accent); border-color:var(--accent); }}
+  .tl-ev.closed .dot {{ background:var(--red); border-color:var(--red); }}
+  .tl-ev.reopened .dot {{ background:var(--green); border-color:var(--green); }}
+  .tl-ev.cashless .dot {{ background:var(--orange); border-color:var(--orange); }}
+  .tl-ev.cash_added .dot {{ background:var(--cyan); border-color:var(--cyan); }}
+  .tl-ev.format_change .dot {{ background:var(--purple); border-color:var(--purple); }}
+  .tl-ev.change .dot {{ background:var(--yellow); border-color:var(--yellow); }}
+  .ev-card {{ background:var(--card); border:1px solid var(--border); border-radius:8px; padding:12px 16px; transition:box-shadow .2s; }}
+  .ev-card:hover {{ box-shadow:0 2px 8px rgba(0,0,0,.05); }}
+  .ev-date {{ font-family:'JetBrains Mono',monospace; font-size:0.68rem; color:var(--dim); margin-bottom:3px; }}
+  .ev-lbl {{ font-size:0.88rem; font-weight:700; margin-bottom:6px; }}
+  .tl-ev.initial .ev-lbl {{ color:var(--accent); }}
+  .tl-ev.closed .ev-lbl {{ color:var(--red); }}
+  .tl-ev.reopened .ev-lbl {{ color:var(--green); }}
+  .tl-ev.cashless .ev-lbl {{ color:var(--orange); }}
+  .tl-ev.cash_added .ev-lbl {{ color:var(--cyan); }}
+  .tl-ev.format_change .ev-lbl {{ color:var(--purple); }}
+  .tl-ev.change .ev-lbl {{ color:var(--yellow); }}
+  .ch-row {{ display:flex; align-items:center; gap:7px; padding:4px 0; font-size:0.76rem; border-bottom:1px solid var(--border-lt); }}
+  .ch-row:last-child {{ border-bottom:none; }}
+  .ch-f {{ font-family:'JetBrains Mono',monospace; font-size:0.68rem; color:var(--muted); min-width:100px; font-weight:600; }}
+  .ch-old {{ color:var(--red); background:var(--red-bg); padding:1px 6px; border-radius:3px; font-size:0.7rem; text-decoration:line-through; }}
+  .ch-arr {{ color:var(--dim); font-size:0.7rem; }}
+  .ch-new {{ color:var(--green); background:var(--green-bg); padding:1px 6px; border-radius:3px; font-size:0.7rem; font-weight:600; }}
+  .st-grid {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:3px 14px; margin-top:4px; }}
+  .st-item {{ display:flex; justify-content:space-between; padding:2px 0; font-size:0.72rem; }}
+  .st-k {{ color:var(--dim); font-family:'JetBrains Mono',monospace; font-size:0.66rem; }}
+  .st-v {{ font-weight:500; }}
 
-  .ov-header h1 {{
-    font-size: 1.4rem;
-    color: var(--accent);
-    margin-bottom: 4px;
-  }}
-
-  .ov-header p {{
-    color: var(--muted);
-    font-size: 0.85rem;
-  }}
-
-  .ov-header .range {{
-    display: inline-block;
-    margin-top: 8px;
-    background: var(--accent-lt);
-    color: var(--accent);
-    padding: 4px 14px;
-    border-radius: 20px;
-    font-size: 0.78rem;
-    font-weight: 600;
-  }}
-
-  .kpi-row {{
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-    gap: 10px;
-    margin-bottom: 24px;
-  }}
-
-  .kpi {{
-    background: var(--card);
-    border-radius: 10px;
-    padding: 14px;
-    text-align: center;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-    border-top: 3px solid transparent;
-  }}
-
-  .kpi .value {{ font-size: 1.6rem; font-weight: 700; line-height: 1.2; }}
-  .kpi .label {{ font-size: 0.75rem; color: var(--muted); margin-top: 3px; }}
-  .kpi .delta {{ font-size: 0.72rem; margin-top: 2px; }}
-  .delta.up {{ color: var(--green); }}
-  .delta.down {{ color: var(--red); }}
-  .delta.neutral {{ color: var(--muted); }}
-
-  .chart-card {{
-    background: var(--card);
-    border-radius: 10px;
-    padding: 18px;
-    margin-bottom: 16px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-  }}
-
-  .chart-card h2 {{ font-size: 0.95rem; margin-bottom: 2px; }}
-  .chart-card .sub {{ font-size: 0.78rem; color: var(--muted); margin-bottom: 10px; }}
-
-  .rc-tabs {{
-    display: flex;
-    gap: 4px;
-    background: var(--bg);
-    padding: 3px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-  }}
-  .rc-tab {{
-    padding: 5px 12px;
-    background: transparent;
-    border: none;
-    border-radius: 5px;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 0.72rem;
-    font-weight: 500;
-    color: var(--muted);
-    cursor: pointer;
-    transition: all 0.15s;
-  }}
-  .rc-tab:hover {{ color: var(--text); }}
-  .rc-tab.active {{
-    background: var(--card);
-    color: var(--accent);
-    font-weight: 700;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.06);
-  }}
-
-  .rc-item {{
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    padding: 10px 0;
-    border-bottom: 1px solid var(--border-lt);
-  }}
-  .rc-item:last-child {{ border-bottom: none; }}
-  .rc-dot {{
-    width: 10px; height: 10px; border-radius: 50%;
-    margin-top: 6px; flex-shrink: 0;
-    border: 2px solid var(--border);
-    background: var(--card);
-  }}
-  .rc-dot.closed {{ background: var(--red); border-color: var(--red); }}
-  .rc-dot.reopened {{ background: var(--green); border-color: var(--green); }}
-  .rc-dot.cashless {{ background: var(--orange); border-color: var(--orange); }}
-  .rc-dot.cash_added {{ background: var(--cyan); border-color: var(--cyan); }}
-  .rc-dot.format {{ background: var(--purple); border-color: var(--purple); }}
-  .rc-dot.format_change {{ background: var(--purple); border-color: var(--purple); }}
-  .rc-dot.change {{ background: var(--yellow); border-color: var(--yellow); }}
-  .rc-body {{ flex: 1; }}
-  .rc-top {{
-    display: flex; gap: 10px; align-items: baseline;
-    font-size: 0.8rem; margin-bottom: 4px; flex-wrap: wrap;
-  }}
-  .rc-date {{
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.7rem; color: var(--dim);
-  }}
-  .rc-code {{
-    font-family: 'JetBrains Mono', monospace;
-    color: var(--accent); font-weight: 600; font-size: 0.72rem;
-    background: var(--accent-lt); padding: 1px 7px; border-radius: 4px;
-  }}
-  .rc-bname {{ font-weight: 600; font-size: 0.82rem; }}
-  .rc-evlabel {{
-    font-size: 0.7rem; color: var(--muted);
-    font-style: italic;
-  }}
-  .rc-change {{ font-size: 0.75rem; color: var(--muted); }}
-  .rc-change .fld {{
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.68rem; color: var(--muted); margin-right: 6px;
-  }}
-  .rc-change .old {{
-    color: var(--red); background: var(--red-bg);
-    padding: 1px 6px; border-radius: 3px; text-decoration: line-through;
-    font-size: 0.7rem;
-  }}
-  .rc-change .arr {{ color: var(--dim); margin: 0 4px; }}
-  .rc-change .new {{
-    color: var(--green); background: var(--green-bg);
-    padding: 1px 6px; border-radius: 3px; font-weight: 600;
-    font-size: 0.7rem;
-  }}
-
-  .table-wrap {{
-    background: var(--card);
-    border-radius: 10px;
-    padding: 18px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-    overflow-x: auto;
-    margin-top: 6px;
-  }}
-
-  .table-wrap h2 {{ font-size: 0.95rem; margin-bottom: 10px; }}
-
-  table {{ width: 100%; border-collapse: collapse; font-size: 0.8rem; }}
-  th, td {{ padding: 7px 10px; text-align: right; border-bottom: 1px solid var(--border-lt); }}
-  th {{ background: #f8f9fc; color: var(--muted); font-weight: 600; position: sticky; top: 0; }}
-  th:first-child, td:first-child {{ text-align: left; }}
-  tr:hover td {{ background: #f5f7fb; }}
-  tr.is-current td {{ background: #fffbeb; font-weight: 600; }}
-  tr.is-current:hover td {{ background: #fef3c7; }}
-
-  #tabDetail {{ display: none; }}
-
-  #tabDetail.active {{
-    display: grid;
-    grid-template-columns: 310px 1fr;
-    min-height: calc(100vh - 49px);
-  }}
-
-  .side {{
-    background: var(--card);
-    border-right: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    height: calc(100vh - 49px);
-    position: sticky;
-    top: 49px;
-  }}
-
-  .side-hdr {{ padding: 18px 16px 12px; border-bottom: 1px solid var(--border); }}
-  .side-hdr h2 {{ font-size: 0.95rem; font-weight: 700; color: var(--accent); margin-bottom: 2px; }}
-  .side-hdr p {{ font-size: 0.72rem; color: var(--muted); }}
-
-  .search-box {{ padding: 10px 16px; border-bottom: 1px solid var(--border); }}
-  .search-box input {{
-    width: 100%; padding: 8px 12px;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 7px;
-    color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 0.82rem;
-    outline: none; transition: border-color 0.2s;
-  }}
-  .search-box input::placeholder {{ color: var(--dim); }}
-  .search-box input:focus {{ border-color: var(--accent); }}
-
-  .flt-bar {{ padding: 8px 16px; border-bottom: 1px solid var(--border); display: flex; gap: 5px; flex-wrap: wrap; }}
-  .flt-btn {{
-    padding: 3px 10px; border-radius: 14px; border: 1px solid var(--border);
-    background: transparent; color: var(--muted); font-family: 'DM Sans', sans-serif;
-    font-size: 0.69rem; font-weight: 500; cursor: pointer; transition: all 0.15s;
-  }}
-  .flt-btn:hover {{ border-color: var(--accent); color: var(--accent); }}
-  .flt-btn.active {{ background: var(--accent-lt); border-color: var(--accent); color: var(--accent); font-weight: 600; }}
-
-  .list-cnt {{ padding: 5px 16px; font-size: 0.69rem; color: var(--dim); border-bottom: 1px solid var(--border-lt); background: var(--bg); }}
-  .b-list {{ flex: 1; overflow-y: auto; }}
-  .b-list::-webkit-scrollbar {{ width: 4px; }}
-  .b-list::-webkit-scrollbar-thumb {{ background: var(--border); border-radius: 3px; }}
-
-  .b-item {{
-    padding: 9px 16px; cursor: pointer; transition: all 0.1s;
-    border-left: 3px solid transparent; border-bottom: 1px solid var(--border-lt);
-  }}
-  .b-item:hover {{ background: var(--bg); }}
-  .b-item.active {{ background: var(--accent-lt); border-left-color: var(--accent); }}
-  .b-item .code {{ font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: var(--accent); font-weight: 600; }}
-  .b-item .name {{ font-size: 0.8rem; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-  .b-item .meta {{ font-size: 0.67rem; color: var(--dim); margin-top: 2px; display: flex; gap: 7px; align-items: center; }}
-  .b-item .badge {{ background: var(--bg); padding: 1px 6px; border-radius: 8px; font-weight: 600; font-size: 0.65rem; border: 1px solid var(--border); }}
-  .sdot {{ width: 6px; height: 6px; border-radius: 50%; display: inline-block; }}
-  .sdot.open {{ background: var(--green); }}
-  .sdot.closed {{ background: var(--red); }}
-
-  .detail {{ padding: 28px 32px; overflow-y: auto; height: calc(100vh - 49px); }}
-  .empty-st {{ display: flex; flex-direction: column; align-items: center; justify-content: center; height: 50vh; color: var(--dim); }}
-  .empty-st .arr {{ font-size: 2rem; margin-bottom: 10px; opacity: 0.3; }}
-
-  .br-hdr {{ margin-bottom: 24px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }}
-  .br-hdr .top {{ display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; }}
-  .br-hdr .bcode {{ font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--accent); background: var(--accent-lt); padding: 3px 10px; border-radius: 5px; font-weight: 600; }}
-  .br-hdr h2 {{ font-size: 1.3rem; font-weight: 700; letter-spacing: -0.02em; }}
-  .chips {{ display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }}
-  .chip {{ padding: 3px 11px; border-radius: 14px; font-size: 0.7rem; font-weight: 600; }}
-  .chip.open {{ background: var(--green-bg); color: var(--green); }}
-  .chip.closed {{ background: var(--red-bg); color: var(--red); }}
-  .chip.cashless {{ background: var(--orange-bg); color: var(--orange); }}
-  .chip.cash {{ background: var(--cyan-bg); color: var(--cyan); }}
-  .chip.nfmt {{ background: var(--purple-bg); color: var(--purple); }}
-  .chip.ofmt {{ background: var(--yellow-bg); color: var(--yellow); }}
-  .sum-txt {{ margin-top: 6px; font-size: 0.78rem; color: var(--muted); }}
-
-  .tl {{ position: relative; padding-left: 30px; }}
-  .tl::before {{
-    content: ''; position: absolute; left: 11px; top: 5px; bottom: 5px; width: 2px;
-    background: linear-gradient(to bottom, var(--accent), var(--border) 20%, var(--border) 85%, transparent);
-    border-radius: 2px;
-  }}
-  .tl-ev {{ position: relative; margin-bottom: 18px; animation: fadeUp 0.22s ease forwards; opacity: 0; }}
-  @keyframes fadeUp {{
-    from {{ opacity: 0; transform: translateY(5px); }}
-    to {{ opacity: 1; transform: translateY(0); }}
-  }}
-  .tl-ev .dot {{ position: absolute; left: -24px; top: 13px; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--border); background: var(--card); z-index: 1; }}
-  .tl-ev.initial .dot {{ background: var(--accent); border-color: var(--accent); }}
-  .tl-ev.closed .dot {{ background: var(--red); border-color: var(--red); }}
-  .tl-ev.reopened .dot {{ background: var(--green); border-color: var(--green); }}
-  .tl-ev.cashless .dot {{ background: var(--orange); border-color: var(--orange); }}
-  .tl-ev.cash_added .dot {{ background: var(--cyan); border-color: var(--cyan); }}
-  .tl-ev.format_change .dot {{ background: var(--purple); border-color: var(--purple); }}
-  .tl-ev.change .dot {{ background: var(--yellow); border-color: var(--yellow); }}
-
-  .ev-card {{ background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; transition: box-shadow 0.2s; }}
-  .ev-card:hover {{ box-shadow: 0 2px 8px rgba(0,0,0,0.05); }}
-  .ev-date {{ font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; color: var(--dim); margin-bottom: 3px; }}
-  .ev-lbl {{ font-size: 0.88rem; font-weight: 700; margin-bottom: 6px; }}
-  .tl-ev.initial .ev-lbl {{ color: var(--accent); }}
-  .tl-ev.closed .ev-lbl {{ color: var(--red); }}
-  .tl-ev.reopened .ev-lbl {{ color: var(--green); }}
-  .tl-ev.cashless .ev-lbl {{ color: var(--orange); }}
-  .tl-ev.cash_added .ev-lbl {{ color: var(--cyan); }}
-  .tl-ev.format_change .ev-lbl {{ color: var(--purple); }}
-  .tl-ev.change .ev-lbl {{ color: var(--yellow); }}
-
-  .ch-row {{ display: flex; align-items: center; gap: 7px; padding: 4px 0; font-size: 0.76rem; border-bottom: 1px solid var(--border-lt); }}
-  .ch-row:last-child {{ border-bottom: none; }}
-  .ch-f {{ font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; color: var(--muted); min-width: 100px; font-weight: 600; }}
-  .ch-old {{ color: var(--red); background: var(--red-bg); padding: 1px 6px; border-radius: 3px; font-size: 0.7rem; text-decoration: line-through; }}
-  .ch-arr {{ color: var(--dim); font-size: 0.7rem; }}
-  .ch-new {{ color: var(--green); background: var(--green-bg); padding: 1px 6px; border-radius: 3px; font-size: 0.7rem; font-weight: 600; }}
-  .st-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 3px 14px; margin-top: 4px; }}
-  .st-item {{ display: flex; justify-content: space-between; padding: 2px 0; font-size: 0.72rem; }}
-  .st-k {{ color: var(--dim); font-family: 'JetBrains Mono', monospace; font-size: 0.66rem; }}
-  .st-v {{ font-weight: 500; }}
-
-  #tabFormats {{ padding: 28px 32px; max-width: 1200px; margin: 0 auto; }}
-
-  .fmt-branch-list {{ display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }}
-  .fmt-branch-pill {{
-    display: inline-flex; align-items: center; gap: 5px;
-    background: var(--purple-bg); border: 1px solid #ddd6fe;
-    border-radius: 14px; padding: 3px 10px; font-size: 0.7rem; color: var(--purple);
-  }}
-  .fmt-branch-pill .pcode {{ font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 0.68rem; }}
-  .fmt-branch-pill .pfmt {{ background: var(--purple); color: #fff; border-radius: 8px; padding: 1px 6px; font-size: 0.63rem; font-weight: 600; }}
-  .fmt-row-toggle {{ cursor: pointer; user-select: none; }}
-  .fmt-row-toggle:hover td {{ background: #f0ebff !important; }}
-  .fmt-detail-row td {{ padding: 0 !important; border-bottom: 1px solid var(--border-lt); }}
-  .fmt-detail-inner {{ padding: 10px 12px 14px 28px; background: #faf8ff; }}
-  .expand-icon {{ display: inline-block; transition: transform 0.18s; font-size: 0.65rem; margin-left: 6px; color: var(--dim); }}
-  .expand-icon.open {{ transform: rotate(90deg); }}
-
-  .foot {{ text-align: center; padding: 16px; font-size: 0.7rem; color: var(--dim); border-top: 1px solid var(--border-lt); margin-top: 20px; }}
-
-  @media (max-width: 860px) {{
-    #tabDetail.active {{ grid-template-columns: 1fr; }}
-    .side {{ position: relative; height: auto; max-height: 38vh; }}
-    .detail {{ height: auto; }}
-    #tabOverview, #tabFormats {{ padding: 20px 16px; }}
+  #tabFormats {{ padding:28px 32px; max-width:1200px; margin:0 auto; }}
+  .fmt-branch-list {{ display:flex; flex-wrap:wrap; gap:5px; margin-top:4px; }}
+  .fmt-branch-pill {{ display:inline-flex; align-items:center; gap:5px; background:var(--purple-bg); border:1px solid #ddd6fe; border-radius:14px; padding:3px 10px; font-size:0.7rem; color:var(--purple); }}
+  .fmt-branch-pill .pcode {{ font-family:'JetBrains Mono',monospace; font-weight:700; font-size:0.68rem; }}
+  .fmt-branch-pill .pfmt {{ background:var(--purple); color:#fff; border-radius:8px; padding:1px 6px; font-size:0.63rem; font-weight:600; }}
+  .fmt-branch-pill .pnum {{ background:var(--accent); color:#fff; border-radius:8px; padding:1px 6px; font-size:0.63rem; font-weight:600; }}
+  .fmt-row-toggle {{ cursor:pointer; user-select:none; }}
+  .fmt-row-toggle:hover td {{ background:#f0ebff !important; }}
+  .fmt-detail-row td {{ padding:0 !important; border-bottom:1px solid var(--border-lt); }}
+  .fmt-detail-inner {{ padding:10px 12px 14px 28px; background:#faf8ff; }}
+  .expand-icon {{ display:inline-block; transition:transform .18s; font-size:0.65rem; margin-left:6px; color:var(--dim); }}
+  .expand-icon.open {{ transform:rotate(90deg); }}
+  .foot {{ text-align:center; padding:16px; font-size:0.7rem; color:var(--dim); border-top:1px solid var(--border-lt); margin-top:20px; }}
+  @media (max-width:860px) {{
+    #tabDetail.active {{ grid-template-columns:1fr; }}
+    .side {{ position:relative; height:auto; max-height:38vh; }}
+    .detail {{ height:auto; }}
+    #tabOverview,#tabFormats {{ padding:20px 16px; }}
   }}
 </style>
 </head>
@@ -752,7 +549,7 @@ html = f"""<!DOCTYPE html>
   </div>
   <div class="chart-card">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap;gap:10px;">
-      <div><h2 style="margin-bottom:2px;">Vývoj pobočkové sítě</h2><div class="sub" style="margin-bottom:0;">Starý formát (modrá) + nový formát (zelená) · zrušené pod osou (šedá) · cashless čárkovaná linie</div></div>
+      <div><h2 style="margin-bottom:2px;">Vývoj pobočkové sítě</h2><div class="sub" style="margin-bottom:0;">Starý formát (modrá) + NF (zelená) · zrušené pod osou · cashless linie</div></div>
       <div class="rc-tabs" id="granTabs">
         <button class="rc-tab" data-gran="M">Měsíce</button>
         <button class="rc-tab active" data-gran="Q">Kvartály</button>
@@ -762,21 +559,21 @@ html = f"""<!DOCTYPE html>
     <div id="chartMain"></div>
   </div>
   <div class="chart-card"><h2>Cashless vs. s hotovostí</h2><div class="sub">Z otevřených poboček</div><div id="chartCashless"></div></div>
-  <div class="chart-card"><h2>Nový vs. starý formát</h2><div class="sub">Z otevřených poboček</div><div id="chartFormat"></div></div>
-  <div class="chart-card"><h2>Struktura sítě v čase</h2><div class="sub">Stacked columns — rozpad otevřených poboček</div><div id="chartStacked"></div></div>
+  <div class="chart-card"><h2>Nový formát (NF) vs. starý</h2><div class="sub">Z otevřených — NF = branch_building_nf_sf==NF &amp; format vyplnněný &amp; nf_number je číslo</div><div id="chartFormat"></div></div>
+  <div class="chart-card"><h2>Struktura sítě v čase</h2><div class="sub">Stacked columns</div><div id="chartStacked"></div></div>
   <div class="table-wrap">
     <h2>Všechny měsíční snapshoty</h2>
     <table id="historyTable">
-      <thead><tr><th>Měsíc</th><th>Celkem</th><th>Otevřené</th><th>Zavřené</th><th>Cashless</th><th>S hotovostí</th><th>Nový formát</th><th>Starý formát</th><th>Δ Otevřené</th></tr></thead>
+      <thead><tr><th>Měsíc</th><th>Celkem</th><th>Otevřené</th><th>Zavřené</th><th>Cashless</th><th>S hotovostí</th><th>NF</th><th>Starý</th><th>Δ Otevřené</th></tr></thead>
       <tbody></tbody>
     </table>
   </div>
-  <div class="foot">Vygenerováno automaticky — filtr: bns_flag = "Y"</div>
+  <div class="foot">Vygenerováno automaticky — filtr: bns_flag = "Y" · NF = nf_sf==NF + format + nf_number</div>
 </div>
 
 <div id="tabDetail" class="tab-content">
   <div class="side">
-    <div class="side-hdr"><h2>Timeline poboček</h2><p>Historie změn stavů jednotlivých poboček</p></div>
+    <div class="side-hdr"><h2>Timeline poboček</h2><p>Historie změn stavů</p></div>
     <div class="search-box"><input type="text" id="searchInput" placeholder="Hledat kód nebo název…"></div>
     <div class="flt-bar">
       <button class="flt-btn active" data-filter="all">Vše</button>
@@ -794,13 +591,13 @@ html = f"""<!DOCTYPE html>
 
 <div id="tabFormats" class="tab-content">
   <div class="ov-header">
-    <h1>Adopce nových formátů</h1>
-    <p>Pobočky, které přešly z prázdného formátu na nenulový — měsíční pohled</p>
+    <h1>Adopce nových formátů (NF)</h1>
+    <p>Pobočky, které přešly na NF: branch_building_nf_sf=NF + format vyplnněný + nf_number je číslo</p>
   </div>
   <div class="kpi-row" id="fmtKpiRow"></div>
   <div class="chart-card">
-    <h2>Měsíční přírůstek poboček s novým formátem</h2>
-    <div class="sub">Počet poboček, které v daném měsíci poprvé dostaly formát (sloupce) · kumulativní součet (linie)</div>
+    <h2>Měsíční přírůstek poboček s NF</h2>
+    <div class="sub">Počet poboček, které v daném měsíci poprvé splňovaly všechny 3 podmínky NF (sloupce) · kumulativní součet (linie)</div>
     <div id="chartFmtAdoption"></div>
   </div>
   <div class="chart-card">
@@ -815,66 +612,65 @@ html = f"""<!DOCTYPE html>
         <th>Měsíc</th>
         <th style="text-align:right;">Přírůstek</th>
         <th style="text-align:right;">Δ od min. měsíce</th>
-        <th style="text-align:right;">Kumulativní součet</th>
-        <th style="text-align:left;">Pobočky <span style="font-weight:400;color:var(--dim);">(klikněte pro rozbalení)</span></th>
+        <th style="text-align:right;">Kumulativní</th>
+        <th style="text-align:left;">Pobočky (klikněte)</th>
       </tr></thead>
       <tbody id="fmtTableBody"></tbody>
     </table>
   </div>
-  <div class="foot">Filtr: bns_flag = "Y" · Pouze přechody formát: prázdný → nenulový</div>
+  <div class="foot">NF podmínky: branch_building_nf_sf = NF &amp; format vyplnněný &amp; nf_number je číslo</div>
 </div>
 
 <script>
-let chartsRendered = false;
-let fmtChartsRendered = false;
+let chartsRendered=false, fmtChartsRendered=false;
 
 document.querySelectorAll('.tab-btn').forEach(btn => {{
-  btn.addEventListener('click', () => {{
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  btn.addEventListener('click',()=>{{
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById(btn.dataset.tab).classList.add('active');
-    if (btn.dataset.tab === 'tabOverview' && !chartsRendered) renderCharts();
-    if (btn.dataset.tab === 'tabFormats' && !fmtChartsRendered) renderFmtCharts();
+    if(btn.dataset.tab==='tabOverview'&&!chartsRendered) renderCharts();
+    if(btn.dataset.tab==='tabFormats'&&!fmtChartsRendered) renderFmtCharts();
   }});
 }});
 
-const historyByGran = {history_all_json};
-const history = historyByGran['M'];
-const hLast = history[history.length - 1];
-const hPrev = history.length > 1 ? history[history.length - 2] : null;
-const hFirst = history[0];
+const historyByGran={history_all_json};
+const history=historyByGran['M'];
+const hLast=history[history.length-1];
+const hPrev=history.length>1?history[history.length-2]:null;
+const hFirst=history[0];
 
-document.getElementById('rangeLabel').textContent = hFirst.label + ' → ' + hLast.label + ' (' + history.length + ' záznamů)';
+document.getElementById('rangeLabel').textContent=hFirst.label+' → '+hLast.label+' ('+history.length+' záznamů)';
 
-function mkDelta(curr, old) {{
-  if (old === null || old === undefined) return '<span class="delta neutral">—</span>';
-  const d = curr - old;
-  if (d === 0) return '<span class="delta neutral">beze změny</span>';
-  return '<span class="delta ' + (d > 0 ? 'up' : 'down') + '">' + (d > 0 ? '+' : '') + d + ' oproti min.</span>';
+function mkDelta(curr,old){{
+  if(old===null||old===undefined) return '<span class="delta neutral">—</span>';
+  const d=curr-old;
+  if(d===0) return '<span class="delta neutral">beze změny</span>';
+  return '<span class="delta '+(d>0?'up':'down')+'">'+(d>0?'+':'')+d+' oproti min.</span>';
 }}
 
-document.getElementById('kpiRow').innerHTML = [
-  {{ label: 'Celkem', value: hLast.total, color: 'var(--accent)', key: 'total' }},
-  {{ label: 'Otevřené', value: hLast.opened, color: 'var(--green)', key: 'opened' }},
-  {{ label: 'Zavřené', value: hLast.closed, color: 'var(--red)', key: 'closed' }},
-  {{ label: 'Cashless', value: hLast.cashless, color: 'var(--orange)', key: 'cashless' }},
-  {{ label: 'S hotovostí', value: hLast.non_cashless, color: 'var(--blue)', key: 'non_cashless' }},
-  {{ label: 'Nový formát', value: hLast.new_format, color: 'var(--purple)', key: 'new_format' }},
-  {{ label: 'Starý formát', value: hLast.old_format, color: 'var(--teal)', key: 'old_format' }},
-].map(k => '<div class="kpi" style="border-top-color:' + k.color + '"><div class="value" style="color:' + k.color + '">' + k.value + '</div><div class="label">' + k.label + '</div>' + mkDelta(k.value, hPrev ? hPrev[k.key] : null) + '</div>').join('');
+document.getElementById('kpiRow').innerHTML=[
+  {{label:'Celkem',value:hLast.total,color:'var(--accent)',key:'total'}},
+  {{label:'Otevřené',value:hLast.opened,color:'var(--green)',key:'opened'}},
+  {{label:'Zavřené',value:hLast.closed,color:'var(--red)',key:'closed'}},
+  {{label:'Cashless',value:hLast.cashless,color:'var(--orange)',key:'cashless'}},
+  {{label:'S hotovostí',value:hLast.non_cashless,color:'var(--blue)',key:'non_cashless'}},
+  {{label:'NF formát',value:hLast.new_format,color:'var(--purple)',key:'new_format'}},
+  {{label:'Starý formát',value:hLast.old_format,color:'var(--teal)',key:'old_format'}},
+].map(k=>'<div class="kpi" style="border-top-color:'+k.color+'"><div class="value" style="color:'+k.color+'">'+k.value+'</div><div class="label">'+k.label+'</div>'+mkDelta(k.value,hPrev?hPrev[k.key]:null)+'</div>').join('');
 
-const recentChangesByCat = {recent_changes_json};
-let activeRcCat = 'all';
-const fldLabelsRC = {{ branch_name:'Název', branch_type:'Typ', branch_closed:'Zavřeno', cashless:'Cashless', format:'Formát', address:'Adresa', city:'Město', region:'Region' }};
-function fvRC(v) {{ if(v===null||v===undefined) return '—'; if(v===true) return 'Ano'; if(v===false) return 'Ne'; if(v===''||v==='nan') return '—'; return String(v); }}
-function escRC(s) {{ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }}
+const recentChangesByCat={recent_changes_json};
+let activeRcCat='all';
+const fldLabelsRC={{branch_name:'Název',branch_type:'Typ',branch_closed:'Zavřeno',cashless:'Cashless',format:'Formát',branch_building_nf_sf:'NF/SF',nf_number:'NF číslo',address:'Adresa',city:'Město',region:'Region'}};
+function fvRC(v){{if(v===null||v===undefined)return'—';if(v===true)return'Ano';if(v===false)return'Ne';if(v===''||v==='nan')return'—';return String(v);}}
+function escRC(s){{const d=document.createElement('div');d.textContent=s;return d.innerHTML;}}
 
-function renderRecentChanges() {{
-  const shown = (recentChangesByCat[activeRcCat]||[]).slice(0,5);
-  const el = document.getElementById('recentChangesList');
-  if(!shown.length) {{ el.innerHTML='<div style="color:var(--dim);font-size:0.8rem;padding:12px 0;text-align:center;">Žádné změny.</div>'; return; }}
-  el.innerHTML = shown.map(c =>
+function renderRecentChanges(){{
+  const shown=(recentChangesByCat[activeRcCat]||[]).slice(0,5);
+  const el=document.getElementById('recentChangesList');
+  if(!shown.length){{el.innerHTML='<div style="color:var(--dim);font-size:0.8rem;padding:12px 0;text-align:center;">Žádné změny.</div>';return;}}
+  el.innerHTML=shown.map(c=>
     '<div class="rc-item"><div class="rc-dot '+c.category+'"></div><div class="rc-body">'+
     '<div class="rc-top"><span class="rc-date">'+c.date+'</span><span class="rc-code">'+c.branch_code+'</span>'+
     '<span class="rc-bname">'+escRC(c.branch_name)+'</span><span class="rc-evlabel">'+escRC(c.label)+'</span></div>'+
@@ -883,121 +679,133 @@ function renderRecentChanges() {{
     '</div></div>'
   ).join('');
 }}
-document.querySelectorAll('#rcTabs .rc-tab').forEach(b => b.addEventListener('click', () => {{ document.querySelectorAll('#rcTabs .rc-tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); activeRcCat=b.dataset.cat; renderRecentChanges(); }}));
+document.querySelectorAll('#rcTabs .rc-tab').forEach(b=>b.addEventListener('click',()=>{{
+  document.querySelectorAll('#rcTabs .rc-tab').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');activeRcCat=b.dataset.cat;renderRecentChanges();
+}}));
 renderRecentChanges();
 
-function renderCharts() {{
-  chartsRendered = true;
-  function makeChart(el, series, colors, stacked) {{
-    new ApexCharts(document.querySelector(el), {{
-      chart: {{ type:'bar', height:280, stacked:stacked||false, fontFamily:'DM Sans,sans-serif', toolbar:{{show:true}}, animations:{{enabled:true,easing:'easeinout',speed:400}} }},
-      series, colors,
-      xaxis: {{ categories: history.map(h=>h.label), labels:{{rotate:-45,style:{{fontSize:'10px'}}}} }},
-      yaxis: {{ labels:{{style:{{fontSize:'11px'}}}}, min:0 }},
-      plotOptions: {{ bar:{{columnWidth:'70%',borderRadius:2,borderRadiusApplication:'end',borderRadiusWhenStacked:'last'}} }},
-      dataLabels: {{ enabled: history.length<=12 }},
-      tooltip: {{ shared:true, intersect:false }},
-      legend: {{ position:'top', fontSize:'12px' }},
-      grid: {{ borderColor:'#e8eaf0', strokeDashArray:3 }},
+function renderCharts(){{
+  chartsRendered=true;
+  function makeChart(el,series,colors,stacked){{
+    new ApexCharts(document.querySelector(el),{{
+      chart:{{type:'bar',height:280,stacked:stacked||false,fontFamily:'DM Sans,sans-serif',toolbar:{{show:true}},animations:{{enabled:true,easing:'easeinout',speed:400}}}},
+      series,colors,
+      xaxis:{{categories:history.map(h=>h.label),labels:{{rotate:-45,style:{{fontSize:'10px'}}}}}},
+      yaxis:{{labels:{{style:{{fontSize:'11px'}}}},min:0}},
+      plotOptions:{{bar:{{columnWidth:'70%',borderRadius:2,borderRadiusApplication:'end',borderRadiusWhenStacked:'last'}}}},
+      dataLabels:{{enabled:history.length<=12}},
+      tooltip:{{shared:true,intersect:false}},
+      legend:{{position:'top',fontSize:'12px'}},
+      grid:{{borderColor:'#e8eaf0',strokeDashArray:3}},
     }}).render();
   }}
 
-  window.buildMainChartOptions = function(hist) {{
+  window.buildMainChartOptions=function(hist){{
     return {{
-      chart: {{ type:'bar', height:380, stacked:true, fontFamily:'DM Sans,sans-serif', toolbar:{{show:true}}, animations:{{enabled:true,easing:'easeinout',speed:400}} }},
-      series: [
-        {{ name:'Starý formát', type:'bar', data:hist.map(h=>h.old_format) }},
-        {{ name:'Nový formát', type:'bar', data:hist.map(h=>h.new_format) }},
-        {{ name:'Zrušené', type:'bar', data:hist.map(h=>-h.closed) }},
-        {{ name:'Cashless', type:'line', data:hist.map(h=>h.cashless) }},
+      chart:{{type:'bar',height:380,stacked:true,fontFamily:'DM Sans,sans-serif',toolbar:{{show:true}},animations:{{enabled:true,easing:'easeinout',speed:400}}}},
+      series:[
+        {{name:'Starý formát',type:'bar',data:hist.map(h=>h.old_format)}},
+        {{name:'NF formát',type:'bar',data:hist.map(h=>h.new_format)}},
+        {{name:'Zrušené',type:'bar',data:hist.map(h=>-h.closed)}},
+        {{name:'Cashless',type:'line',data:hist.map(h=>h.cashless)}},
       ],
-      colors: ['#3b82f6','#10b981','#d1d5db','#1e293b'],
-      stroke: {{ width:[0,0,0,2.5], dashArray:[0,0,0,6], curve:'smooth' }},
-      plotOptions: {{ bar:{{columnWidth:'65%',borderRadius:2,borderRadiusApplication:'end',borderRadiusWhenStacked:'last'}} }},
-      xaxis: {{ categories:hist.map(h=>h.label), labels:{{rotate:-45,style:{{fontSize:'10px'}}}}, axisBorder:{{show:true,color:'#94a3b8'}} }},
-      yaxis: {{ labels:{{style:{{fontSize:'11px'}},formatter:v=>Math.abs(Math.round(v))}} }},
-      dataLabels: {{ enabled:hist.length<=14, formatter:val=>{{const v=Math.abs(Math.round(val)); return v===0?'':(val<0?'-'+v:v);}}, style:{{fontSize:'10px',fontWeight:700,colors:['#fff','#fff','#64748b','#1e293b']}}, background:{{enabled:true,foreColor:'#fff',borderRadius:2,padding:3,opacity:0.85,borderWidth:0}} }},
-      tooltip: {{ shared:true, intersect:false, y:{{formatter:val=>Math.abs(Math.round(val))}} }},
-      legend: {{ position:'top', fontSize:'12px', markers:{{width:10,height:10,radius:2}} }},
-      grid: {{ borderColor:'#e8eaf0', strokeDashArray:3 }},
-      annotations: {{
-        yaxis: [{{ y:0, borderColor:'#94a3b8', strokeDashArray:0, borderWidth:1 }}],
-        points: hist.map(h=>({{ x:h.label, y:h.opened, seriesIndex:1, marker:{{size:0}}, label:{{ text:String(h.opened), borderColor:'transparent', borderWidth:0, borderRadius:3, style:{{background:'transparent',color:'#1e293b',fontSize:'11px',fontWeight:700,padding:{{left:4,right:4,top:2,bottom:2}}}}, offsetY:-8 }} }})),
+      colors:['#3b82f6','#10b981','#d1d5db','#1e293b'],
+      stroke:{{width:[0,0,0,2.5],dashArray:[0,0,0,6],curve:'smooth'}},
+      plotOptions:{{bar:{{columnWidth:'65%',borderRadius:2,borderRadiusApplication:'end',borderRadiusWhenStacked:'last'}}}},
+      xaxis:{{categories:hist.map(h=>h.label),labels:{{rotate:-45,style:{{fontSize:'10px'}}}},axisBorder:{{show:true,color:'#94a3b8'}}}},
+      yaxis:{{labels:{{style:{{fontSize:'11px'}},formatter:v=>Math.abs(Math.round(v))}}}},
+      dataLabels:{{enabled:hist.length<=14,formatter:val=>{{const v=Math.abs(Math.round(val));return v===0?'':(val<0?'-'+v:v);}},style:{{fontSize:'10px',fontWeight:700,colors:['#fff','#fff','#64748b','#1e293b']}},background:{{enabled:true,foreColor:'#fff',borderRadius:2,padding:3,opacity:0.85,borderWidth:0}}}},
+      tooltip:{{shared:true,intersect:false,y:{{formatter:val=>Math.abs(Math.round(val))}}}},
+      legend:{{position:'top',fontSize:'12px',markers:{{width:10,height:10,radius:2}}}},
+      grid:{{borderColor:'#e8eaf0',strokeDashArray:3}},
+      annotations:{{
+        yaxis:[{{y:0,borderColor:'#94a3b8',strokeDashArray:0,borderWidth:1}}],
+        points:hist.map(h=>({{x:h.label,y:h.opened,seriesIndex:1,marker:{{size:0}},label:{{text:String(h.opened),borderColor:'transparent',borderWidth:0,borderRadius:3,style:{{background:'transparent',color:'#1e293b',fontSize:'11px',fontWeight:700,padding:{{left:4,right:4,top:2,bottom:2}}}},offsetY:-8}}}})),
       }},
     }};
   }};
 
-  window.mainChart = new ApexCharts(document.querySelector('#chartMain'), window.buildMainChartOptions(historyByGran['Q']));
+  window.mainChart=new ApexCharts(document.querySelector('#chartMain'),window.buildMainChartOptions(historyByGran['Q']));
   window.mainChart.render();
-
-  makeChart('#chartCashless', [{{name:'Cashless',data:history.map(h=>h.cashless)}},{{name:'S hotovostí',data:history.map(h=>h.non_cashless)}}], ['#d97706','#2563eb'], true);
-  makeChart('#chartFormat', [{{name:'Nový formát',data:history.map(h=>h.new_format)}},{{name:'Starý formát',data:history.map(h=>h.old_format)}}], ['#7c3aed','#0d9488'], true);
-  makeChart('#chartStacked', [
-    {{name:'Cashless+nový',data:history.map(h=>Math.min(h.cashless,h.new_format))}},
+  makeChart('#chartCashless',[{{name:'Cashless',data:history.map(h=>h.cashless)}},{{name:'S hotovostí',data:history.map(h=>h.non_cashless)}}],['#d97706','#2563eb'],true);
+  makeChart('#chartFormat',[{{name:'NF formát',data:history.map(h=>h.new_format)}},{{name:'Starý formát',data:history.map(h=>h.old_format)}}],['#7c3aed','#0d9488'],true);
+  makeChart('#chartStacked',[
+    {{name:'Cashless+NF',data:history.map(h=>Math.min(h.cashless,h.new_format))}},
     {{name:'Cashless+starý',data:history.map(h=>Math.max(0,h.cashless-h.new_format))}},
-    {{name:'Hotovost+nový',data:history.map(h=>Math.max(0,h.new_format-h.cashless))}},
+    {{name:'Hotovost+NF',data:history.map(h=>Math.max(0,h.new_format-h.cashless))}},
     {{name:'Hotovost+starý',data:history.map(h=>h.old_format)}},
-  ], ['#f59e0b','#ef4444','#8b5cf6','#6b7280'], true);
+  ],['#f59e0b','#ef4444','#8b5cf6','#6b7280'],true);
 }}
 
-const tbody = document.querySelector('#historyTable tbody');
-history.slice().reverse().forEach((h,i,arr) => {{
-  const prevH = i < arr.length-1 ? arr[i+1] : null;
-  const dOpen = prevH ? h.opened-prevH.opened : 0;
-  const tr = document.createElement('tr');
+const tbody=document.querySelector('#historyTable tbody');
+history.slice().reverse().forEach((h,i,arr)=>{{
+  const prevH=i<arr.length-1?arr[i+1]:null;
+  const dOpen=prevH?h.opened-prevH.opened:0;
+  const tr=document.createElement('tr');
   if(h.is_current) tr.className='is-current';
-  tr.innerHTML = '<td>'+h.label+'</td><td>'+h.total+'</td><td><strong>'+h.opened+'</strong></td><td>'+h.closed+'</td><td>'+h.cashless+'</td><td>'+h.non_cashless+'</td><td>'+h.new_format+'</td><td>'+h.old_format+'</td><td><span class="delta '+(dOpen>0?'up':dOpen<0?'down':'neutral')+'">'+(prevH?(dOpen>0?'+':'')+dOpen:'—')+'</span></td>';
+  tr.innerHTML='<td>'+h.label+'</td><td>'+h.total+'</td><td><strong>'+h.opened+'</strong></td><td>'+h.closed+'</td><td>'+h.cashless+'</td><td>'+h.non_cashless+'</td><td>'+h.new_format+'</td><td>'+h.old_format+'</td><td><span class="delta '+(dOpen>0?'up':dOpen<0?'down':'neutral')+'">'+(prevH?(dOpen>0?'+':'')+dOpen:'—')+'</span></td>';
   tbody.appendChild(tr);
 }});
 
 renderCharts();
-
-document.querySelectorAll('#granTabs .rc-tab').forEach(b => b.addEventListener('click', () => {{
+document.querySelectorAll('#granTabs .rc-tab').forEach(b=>b.addEventListener('click',()=>{{
   document.querySelectorAll('#granTabs .rc-tab').forEach(x=>x.classList.remove('active'));
   b.classList.add('active');
-  const hist = historyByGran[b.dataset.gran]||[];
-  if(window.mainChart && hist.length) window.mainChart.updateOptions(window.buildMainChartOptions(hist),true,true);
+  const hist=historyByGran[b.dataset.gran]||[];
+  if(window.mainChart&&hist.length) window.mainChart.updateOptions(window.buildMainChartOptions(hist),true,true);
 }}));
 
-const branches = {branches_json};
-let activeFilter='all', activeCode=null;
+/* ====== TAB 2 — DETAIL ====== */
+const branches={branches_json};
+let activeFilter='all',activeCode=null;
 const searchInput=document.getElementById('searchInput');
 const branchList=document.getElementById('branchList');
 const detailContent=document.getElementById('detailContent');
 const listCount=document.getElementById('listCount');
-const fldLabels={{ branch_name:'Název',branch_type:'Typ',branch_closed:'Zavřeno',cashless:'Cashless',format:'Formát',address:'Adresa',city:'Město',region:'Region' }};
-function fv(v){{ if(v===null||v===undefined)return'—'; if(v===true)return'Ano'; if(v===false)return'Ne'; if(v===''||v==='nan')return'—'; return String(v); }}
-function esc(s){{ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }}
+const fldLabels={{branch_name:'Název',branch_type:'Typ',branch_closed:'Zavřeno',cashless:'Cashless',format:'Formát',branch_building_nf_sf:'NF/SF',nf_number:'NF číslo',address:'Adresa',city:'Město',region:'Region'}};
 
-function filterBranches() {{
+function isNewFormat(st){{
+  const nf=st.branch_building_nf_sf;
+  const fm=st.format;
+  const nn=st.nf_number;
+  if(!nf||String(nf).trim()!=='NF') return false;
+  if(!fm||['','nan','None'].includes(String(fm).trim())) return false;
+  if(nn===null||nn===undefined) return false;
+  return !isNaN(parseFloat(String(nn)));
+}}
+function fv(v){{if(v===null||v===undefined)return'—';if(v===true)return'Ano';if(v===false)return'Ne';if(v===''||v==='nan')return'—';return String(v);}}
+function esc(s){{const d=document.createElement('div');d.textContent=s;return d.innerHTML;}}
+
+function filterBranches(){{
   const q=searchInput.value.toLowerCase().trim();
   return branches.filter(b=>{{
-    if(q && !String(b.code).includes(q) && !b.name.toLowerCase().includes(q)) return false;
+    if(q&&!String(b.code).includes(q)&&!b.name.toLowerCase().includes(q)) return false;
     const last=b.events[b.events.length-1];
-    if(activeFilter==='has-changes' && b.total_changes===0) return false;
-    if(activeFilter==='closed' && !last.state.branch_closed) return false;
-    if(activeFilter==='cashless' && !last.state.cashless) return false;
+    if(activeFilter==='has-changes'&&b.total_changes===0) return false;
+    if(activeFilter==='closed'&&!last.state.branch_closed) return false;
+    if(activeFilter==='cashless'&&!last.state.cashless) return false;
     return true;
   }});
 }}
 
-function renderList() {{
+function renderList(){{
   const filtered=filterBranches();
   listCount.textContent=filtered.length+' poboček';
   branchList.innerHTML=filtered.map(b=>{{
     const last=b.events[b.events.length-1];
     const cls=activeCode===b.code?' active':'';
     const dc=last.state.branch_closed?'closed':'open';
-    return '<div class="b-item'+cls+'" data-code="'+b.code+'"><div class="code">'+b.code+'</div><div class="name">'+esc(b.name)+'</div><div class="meta"><span class="badge">'+b.total_changes+' změn</span><span class="sdot '+dc+'"></span> '+(last.state.branch_closed?'zavřena':'otevřena')+(last.state.cashless?' · cashless':'')+'</div></div>';
+    return '<div class="b-item'+cls+'" data-code="'+b.code+'"><div class="code">'+b.code+'</div><div class="name">'+esc(b.name)+'</div><div class="meta"><span class="badge">'+b.total_changes+' změn</span><span class="sdot '+dc+'"></span>'+(last.state.branch_closed?'zavřena':'otevřena')+(last.state.cashless?' · cashless':'')+(isNewFormat(last.state)?' · NF':'')+'</div></div>';
   }}).join('');
   branchList.querySelectorAll('.b-item').forEach(el=>el.addEventListener('click',()=>{{activeCode=parseInt(el.dataset.code);renderList();renderTimeline();}}));
 }}
 
-function renderTimeline() {{
+function renderTimeline(){{
   const br=branches.find(b=>b.code===activeCode); if(!br) return;
   const ls=br.events[br.events.length-1].state;
-  const hf=ls.format&&ls.format!==''&&ls.format!=='nan';
-  let h='<div class="br-hdr"><div class="top"><span class="bcode">'+br.code+'</span><h2>'+esc(br.name)+'</h2></div><div class="chips">'+(ls.branch_closed?'<span class="chip closed">● Zavřena</span>':'<span class="chip open">● Otevřena</span>')+(ls.cashless?'<span class="chip cashless">Cashless</span>':'<span class="chip cash">S hotovostí</span>')+(hf?'<span class="chip nfmt">Formát: '+esc(ls.format)+'</span>':'<span class="chip ofmt">Bez formátu</span>')+'</div><div class="sum-txt">'+br.events.length+' záznamů · '+br.total_changes+' změn · '+br.events[0].date+' → '+br.events[br.events.length-1].date+'</div></div>';
+  const hf=isNewFormat(ls);
+  let h='<div class="br-hdr"><div class="top"><span class="bcode">'+br.code+'</span><h2>'+esc(br.name)+'</h2></div><div class="chips">'+(ls.branch_closed?'<span class="chip closed">● Zavřena</span>':'<span class="chip open">● Otevřena</span>')+(ls.cashless?'<span class="chip cashless">Cashless</span>':'<span class="chip cash">S hotovostí</span>')+(hf?'<span class="chip nfmt">'+esc(ls.format)+(ls.nf_number!==null&&ls.nf_number!==undefined?' #'+ls.nf_number:'')+' NF</span>':'<span class="chip ofmt">Starý formát</span>')+'</div><div class="sum-txt">'+br.events.length+' záznamů · '+br.total_changes+' změn · '+br.events[0].date+' → '+br.events[br.events.length-1].date+'</div></div>';
   h+='<div class="tl">';
   br.events.forEach((evt,idx)=>{{
     const dl=Math.min(idx*0.04,0.5);
@@ -1006,8 +814,8 @@ function renderTimeline() {{
       h+='<div class="st-grid">';
       for(const [k,v] of Object.entries(evt.state)) h+='<div class="st-item"><span class="st-k">'+(fldLabels[k]||k)+'</span><span class="st-v">'+esc(fv(v))+'</span></div>';
       h+='</div>';
-    }} else if(evt.changes.length) {{
-      evt.changes.forEach(ch=>{{ h+='<div class="ch-row"><span class="ch-f">'+(fldLabels[ch.field]||ch.field)+'</span><span class="ch-old">'+esc(fv(ch.old))+'</span><span class="ch-arr">→</span><span class="ch-new">'+esc(fv(ch.new))+'</span></div>'; }});
+    }} else if(evt.changes.length){{
+      evt.changes.forEach(ch=>{{h+='<div class="ch-row"><span class="ch-f">'+(fldLabels[ch.field]||ch.field)+'</span><span class="ch-old">'+esc(fv(ch.old))+'</span><span class="ch-arr">→</span><span class="ch-new">'+esc(fv(ch.new))+'</span></div>';}});
     }}
     h+='</div></div>';
   }});
@@ -1016,14 +824,18 @@ function renderTimeline() {{
 }}
 
 searchInput.addEventListener('input',renderList);
-document.querySelectorAll('.flt-btn').forEach(b=>b.addEventListener('click',()=>{{document.querySelectorAll('.flt-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');activeFilter=b.dataset.filter;renderList();}}));
+document.querySelectorAll('.flt-btn').forEach(b=>b.addEventListener('click',()=>{{
+  document.querySelectorAll('.flt-btn').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');activeFilter=b.dataset.filter;renderList();
+}}));
 renderList();
 
-const fmtData = {format_monthly_json};
+/* ====== TAB 3 — NOVÉ FORMÁTY ====== */
+const fmtData={format_monthly_json};
 
-function renderFmtCharts() {{
+function renderFmtCharts(){{
   fmtChartsRendered=true;
-  if(!fmtData.length) {{ document.getElementById('fmtKpiRow').innerHTML='<div style="color:var(--dim);padding:20px;text-align:center;">Žádné přechody na nový formát.</div>'; return; }}
+  if(!fmtData.length){{document.getElementById('fmtKpiRow').innerHTML='<div style="color:var(--dim);padding:20px;text-align:center;">Žádné přechody na NF.</div>';return;}}
   const total=fmtData.reduce((s,m)=>s+m.count,0);
   const maxM=fmtData.reduce((a,b)=>b.count>a.count?b:a);
   const avg=(total/fmtData.length).toFixed(1);
@@ -1041,21 +853,20 @@ function renderFmtCharts() {{
 
   new ApexCharts(document.querySelector('#chartFmtAdoption'),{{
     chart:{{type:'bar',height:300,fontFamily:'DM Sans,sans-serif',toolbar:{{show:true}},animations:{{enabled:true,easing:'easeinout',speed:400}}}},
-    series:[{{name:'Přírůstek',type:'bar',data:counts}},{{name:'Kumulativní',type:'line',data:cumulative}}],
+    series:[{{name:'Přírůstek NF',type:'bar',data:counts}},{{name:'Kumulativní',type:'line',data:cumulative}}],
     colors:['#7c3aed','#0891b2'],
     stroke:{{width:[0,2.5],curve:'smooth'}},
     plotOptions:{{bar:{{columnWidth:'60%',borderRadius:3}}}},
     xaxis:{{categories:labels,labels:{{rotate:-45,style:{{fontSize:'10px'}}}}}},
     yaxis:[{{title:{{text:'Přírůstek',style:{{fontSize:'11px'}}}},min:0}},{{opposite:true,title:{{text:'Kumulativně',style:{{fontSize:'11px'}}}},min:0}}],
     dataLabels:{{enabled:fmtData.length<=18,enabledOnSeries:[0],style:{{fontSize:'10px',fontWeight:700}},background:{{enabled:true,borderRadius:2,padding:2,opacity:0.85,borderWidth:0}}}},
-    tooltip:{{shared:true,intersect:false}},
-    legend:{{position:'top',fontSize:'12px'}},
+    tooltip:{{shared:true,intersect:false}},legend:{{position:'top',fontSize:'12px'}},
     grid:{{borderColor:'#e8eaf0',strokeDashArray:3}},
   }}).render();
 
   new ApexCharts(document.querySelector('#chartFmtDelta'),{{
     chart:{{type:'bar',height:220,fontFamily:'DM Sans,sans-serif',toolbar:{{show:false}},animations:{{enabled:true,easing:'easeinout',speed:400}}}},
-    series:[{{name:'Δ přírůstek',data:deltas}}],
+    series:[{{name:'Δ NF přírůstek',data:deltas}}],
     plotOptions:{{bar:{{columnWidth:'60%',borderRadius:2,colors:{{ranges:[{{from:-9999,to:-1,color:'#dc2626'}},{{from:0,to:0,color:'#94a3b8'}},{{from:1,to:9999,color:'#059669'}}]}}}}}},
     xaxis:{{categories:labels,labels:{{rotate:-45,style:{{fontSize:'10px'}}}}}},
     yaxis:{{labels:{{style:{{fontSize:'11px'}},formatter:v=>(v>0?'+':'')+v}}}},
@@ -1072,12 +883,15 @@ function renderFmtCharts() {{
     const cumul=cumulative[origIdx];
     const dText=delta===null?'—':(delta>0?'+'+delta:String(delta));
     const dClass=delta===null?'neutral':delta>0?'up':delta<0?'down':'neutral';
-    const pillsHtml=m.branches.map(b=>'<span class="fmt-branch-pill"><span class="pcode">'+b.branch_code+'</span>'+esc(b.branch_name)+'<span class="pfmt">'+esc(b.format_new)+'</span></span>').join('');
+    const pillsHtml=m.branches.map(b=>
+      '<span class="fmt-branch-pill"><span class="pcode">'+b.branch_code+'</span>'+esc(b.branch_name)+
+      '<span class="pfmt">'+esc(b.format_new)+'</span>'+(b.nf_number&&b.nf_number!=='None'&&b.nf_number!==''?'<span class="pnum">#'+esc(b.nf_number)+'</span>':'')+'</span>'
+    ).join('');
     const tr=document.createElement('tr');
     tr.className='fmt-row-toggle';
     tr.innerHTML='<td style="font-family:monospace;font-size:0.8rem;">'+m.month+'</td><td style="font-weight:700;color:var(--purple);">'+m.count+'</td><td><span class="delta '+dClass+'">'+dText+'</span></td><td>'+cumul+'</td><td style="text-align:left;color:var(--muted);font-size:0.75rem;">'+m.branches.slice(0,3).map(b=>'<span style="font-family:monospace;font-size:0.7rem;color:var(--accent);">'+b.branch_code+'</span>').join(' ')+(m.count>3?' <span style="color:var(--dim);">+'+( m.count-3)+' dalších</span>':'')+' <span class="expand-icon" id="icon-'+i+'">▶</span></td>';
     const trD=document.createElement('tr');
-    trD.className='fmt-detail-row'; trD.style.display='none';
+    trD.className='fmt-detail-row';trD.style.display='none';
     trD.innerHTML='<td colspan="5"><div class="fmt-detail-inner"><div class="fmt-branch-list">'+pillsHtml+'</div></div></td>';
     tr.addEventListener('click',()=>{{
       const open=trD.style.display!=='none';
@@ -1085,7 +899,7 @@ function renderFmtCharts() {{
       const ic=document.getElementById('icon-'+i);
       if(ic) ic.classList.toggle('open',!open);
     }});
-    fmtTbody.appendChild(tr); fmtTbody.appendChild(trD);
+    fmtTbody.appendChild(tr);fmtTbody.appendChild(trD);
   }});
 }}
 
