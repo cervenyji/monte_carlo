@@ -4,6 +4,7 @@ import os
 import numpy as np
 from datetime import datetime
 from collections import defaultdict
+import urllib.request
 
 df = pd.read_csv('in/tables/dbs_branch_network_epb.csv')
 
@@ -242,7 +243,6 @@ print(f"🔔 Změny připraveny: "
 
 # =========================================================
 # ČÁST C — Měsíční přírůstky poboček s novým formátem
-# Sledujeme pobočky, které přešly z prázdného formátu na nenulový.
 # =========================================================
 format_transitions = []
 for code, bdata in branches_data.items():
@@ -281,6 +281,18 @@ for m in all_fmt_months:
 print(f"🎨 Přechody na nový formát: {len(format_transitions)} celkem, {len(format_monthly_summary)} měsíců")
 
 # =========================================================
+# STAŽENÍ APEXCHARTS — embed do HTML (funguje offline/file://)
+# =========================================================
+_apex_url = "https://cdn.jsdelivr.net/npm/apexcharts/dist/apexcharts.min.js"
+try:
+    with urllib.request.urlopen(_apex_url, timeout=15) as _r:
+        _apex_js = _r.read().decode("utf-8")
+    print(f"📦 ApexCharts stažen ({len(_apex_js)//1024} KB) — bude embedded inline")
+except Exception as _e:
+    _apex_js = None
+    print(f"⚠️  ApexCharts se nepodařilo stáhnout ({_e}) — použije se CDN odkaz")
+
+# =========================================================
 # GENEROVÁNÍ JEDNOHO HTML
 # =========================================================
 history_json = json.dumps(history, ensure_ascii=False)
@@ -294,6 +306,11 @@ recent_changes_json = json.dumps(recent_changes_by_cat, ensure_ascii=False)
 format_monthly_json = json.dumps(format_monthly_summary, ensure_ascii=False)
 
 REPORT_FILE = "branch_timeline_report.html"
+apex_script_tag = (
+    "<script>" + _apex_js + "</script>"
+    if _apex_js
+    else '<script src="https://cdn.jsdelivr.net/npm/apexcharts/dist/apexcharts.min.js"></script>'
+)
 
 html = f"""<!DOCTYPE html>
 <html lang="cs">
@@ -301,7 +318,7 @@ html = f"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pobočková síť ČS — Report</title>
-<script src="https://unpkg.com/apexcharts/dist/apexcharts.min.js"></script>
+{apex_script_tag}
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,700&family=JetBrains+Mono:wght@400;600&display=swap');
 
@@ -557,10 +574,7 @@ html = f"""<!DOCTYPE html>
   tr.is-current td {{ background: #fffbeb; font-weight: 600; }}
   tr.is-current:hover td {{ background: #fef3c7; }}
 
-  /* ===== TAB 2 — DETAIL ===== */
-  #tabDetail {{
-    display: none;
-  }}
+  #tabDetail {{ display: none; }}
 
   #tabDetail.active {{
     display: grid;
@@ -578,212 +592,78 @@ html = f"""<!DOCTYPE html>
     top: 49px;
   }}
 
-  .side-hdr {{
-    padding: 18px 16px 12px;
-    border-bottom: 1px solid var(--border);
-  }}
-
-  .side-hdr h2 {{
-    font-size: 0.95rem;
-    font-weight: 700;
-    color: var(--accent);
-    margin-bottom: 2px;
-  }}
-
+  .side-hdr {{ padding: 18px 16px 12px; border-bottom: 1px solid var(--border); }}
+  .side-hdr h2 {{ font-size: 0.95rem; font-weight: 700; color: var(--accent); margin-bottom: 2px; }}
   .side-hdr p {{ font-size: 0.72rem; color: var(--muted); }}
 
-  .search-box {{
-    padding: 10px 16px;
-    border-bottom: 1px solid var(--border);
-  }}
-
+  .search-box {{ padding: 10px 16px; border-bottom: 1px solid var(--border); }}
   .search-box input {{
-    width: 100%;
-    padding: 8px 12px;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 7px;
-    color: var(--text);
-    font-family: 'DM Sans', sans-serif;
-    font-size: 0.82rem;
-    outline: none;
-    transition: border-color 0.2s;
+    width: 100%; padding: 8px 12px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 7px;
+    color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 0.82rem;
+    outline: none; transition: border-color 0.2s;
   }}
-
   .search-box input::placeholder {{ color: var(--dim); }}
   .search-box input:focus {{ border-color: var(--accent); }}
 
-  .flt-bar {{
-    padding: 8px 16px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    gap: 5px;
-    flex-wrap: wrap;
-  }}
-
+  .flt-bar {{ padding: 8px 16px; border-bottom: 1px solid var(--border); display: flex; gap: 5px; flex-wrap: wrap; }}
   .flt-btn {{
-    padding: 3px 10px;
-    border-radius: 14px;
-    border: 1px solid var(--border);
-    background: transparent;
-    color: var(--muted);
-    font-family: 'DM Sans', sans-serif;
-    font-size: 0.69rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.15s;
+    padding: 3px 10px; border-radius: 14px; border: 1px solid var(--border);
+    background: transparent; color: var(--muted); font-family: 'DM Sans', sans-serif;
+    font-size: 0.69rem; font-weight: 500; cursor: pointer; transition: all 0.15s;
   }}
-
   .flt-btn:hover {{ border-color: var(--accent); color: var(--accent); }}
   .flt-btn.active {{ background: var(--accent-lt); border-color: var(--accent); color: var(--accent); font-weight: 600; }}
 
-  .list-cnt {{
-    padding: 5px 16px;
-    font-size: 0.69rem;
-    color: var(--dim);
-    border-bottom: 1px solid var(--border-lt);
-    background: var(--bg);
-  }}
-
-  .b-list {{
-    flex: 1;
-    overflow-y: auto;
-  }}
-
+  .list-cnt {{ padding: 5px 16px; font-size: 0.69rem; color: var(--dim); border-bottom: 1px solid var(--border-lt); background: var(--bg); }}
+  .b-list {{ flex: 1; overflow-y: auto; }}
   .b-list::-webkit-scrollbar {{ width: 4px; }}
   .b-list::-webkit-scrollbar-thumb {{ background: var(--border); border-radius: 3px; }}
 
   .b-item {{
-    padding: 9px 16px;
-    cursor: pointer;
-    transition: all 0.1s;
-    border-left: 3px solid transparent;
-    border-bottom: 1px solid var(--border-lt);
+    padding: 9px 16px; cursor: pointer; transition: all 0.1s;
+    border-left: 3px solid transparent; border-bottom: 1px solid var(--border-lt);
   }}
-
   .b-item:hover {{ background: var(--bg); }}
   .b-item.active {{ background: var(--accent-lt); border-left-color: var(--accent); }}
-
-  .b-item .code {{
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.7rem;
-    color: var(--accent);
-    font-weight: 600;
-  }}
-
-  .b-item .name {{
-    font-size: 0.8rem;
-    margin-top: 1px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }}
-
-  .b-item .meta {{
-    font-size: 0.67rem;
-    color: var(--dim);
-    margin-top: 2px;
-    display: flex;
-    gap: 7px;
-    align-items: center;
-  }}
-
-  .b-item .badge {{
-    background: var(--bg);
-    padding: 1px 6px;
-    border-radius: 8px;
-    font-weight: 600;
-    font-size: 0.65rem;
-    border: 1px solid var(--border);
-  }}
-
+  .b-item .code {{ font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: var(--accent); font-weight: 600; }}
+  .b-item .name {{ font-size: 0.8rem; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+  .b-item .meta {{ font-size: 0.67rem; color: var(--dim); margin-top: 2px; display: flex; gap: 7px; align-items: center; }}
+  .b-item .badge {{ background: var(--bg); padding: 1px 6px; border-radius: 8px; font-weight: 600; font-size: 0.65rem; border: 1px solid var(--border); }}
   .sdot {{ width: 6px; height: 6px; border-radius: 50%; display: inline-block; }}
   .sdot.open {{ background: var(--green); }}
   .sdot.closed {{ background: var(--red); }}
 
-  .detail {{
-    padding: 28px 32px;
-    overflow-y: auto;
-    height: calc(100vh - 49px);
-  }}
-
-  .empty-st {{
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 50vh;
-    color: var(--dim);
-  }}
-
+  .detail {{ padding: 28px 32px; overflow-y: auto; height: calc(100vh - 49px); }}
+  .empty-st {{ display: flex; flex-direction: column; align-items: center; justify-content: center; height: 50vh; color: var(--dim); }}
   .empty-st .arr {{ font-size: 2rem; margin-bottom: 10px; opacity: 0.3; }}
 
   .br-hdr {{ margin-bottom: 24px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }}
   .br-hdr .top {{ display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; }}
-
-  .br-hdr .bcode {{
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.8rem;
-    color: var(--accent);
-    background: var(--accent-lt);
-    padding: 3px 10px;
-    border-radius: 5px;
-    font-weight: 600;
-  }}
-
+  .br-hdr .bcode {{ font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--accent); background: var(--accent-lt); padding: 3px 10px; border-radius: 5px; font-weight: 600; }}
   .br-hdr h2 {{ font-size: 1.3rem; font-weight: 700; letter-spacing: -0.02em; }}
-
   .chips {{ display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }}
-
-  .chip {{
-    padding: 3px 11px;
-    border-radius: 14px;
-    font-size: 0.7rem;
-    font-weight: 600;
-  }}
-
+  .chip {{ padding: 3px 11px; border-radius: 14px; font-size: 0.7rem; font-weight: 600; }}
   .chip.open {{ background: var(--green-bg); color: var(--green); }}
   .chip.closed {{ background: var(--red-bg); color: var(--red); }}
   .chip.cashless {{ background: var(--orange-bg); color: var(--orange); }}
   .chip.cash {{ background: var(--cyan-bg); color: var(--cyan); }}
   .chip.nfmt {{ background: var(--purple-bg); color: var(--purple); }}
   .chip.ofmt {{ background: var(--yellow-bg); color: var(--yellow); }}
-
   .sum-txt {{ margin-top: 6px; font-size: 0.78rem; color: var(--muted); }}
 
   .tl {{ position: relative; padding-left: 30px; }}
-
   .tl::before {{
-    content: '';
-    position: absolute;
-    left: 11px; top: 5px; bottom: 5px;
-    width: 2px;
+    content: ''; position: absolute; left: 11px; top: 5px; bottom: 5px; width: 2px;
     background: linear-gradient(to bottom, var(--accent), var(--border) 20%, var(--border) 85%, transparent);
     border-radius: 2px;
   }}
-
-  .tl-ev {{
-    position: relative;
-    margin-bottom: 18px;
-    animation: fadeUp 0.22s ease forwards;
-    opacity: 0;
-  }}
-
+  .tl-ev {{ position: relative; margin-bottom: 18px; animation: fadeUp 0.22s ease forwards; opacity: 0; }}
   @keyframes fadeUp {{
     from {{ opacity: 0; transform: translateY(5px); }}
     to {{ opacity: 1; transform: translateY(0); }}
   }}
-
-  .tl-ev .dot {{
-    position: absolute;
-    left: -24px; top: 13px;
-    width: 9px; height: 9px;
-    border-radius: 50%;
-    border: 2px solid var(--border);
-    background: var(--card);
-    z-index: 1;
-  }}
-
+  .tl-ev .dot {{ position: absolute; left: -24px; top: 13px; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--border); background: var(--card); z-index: 1; }}
   .tl-ev.initial .dot {{ background: var(--accent); border-color: var(--accent); }}
   .tl-ev.closed .dot {{ background: var(--red); border-color: var(--red); }}
   .tl-ev.reopened .dot {{ background: var(--green); border-color: var(--green); }}
@@ -792,25 +672,10 @@ html = f"""<!DOCTYPE html>
   .tl-ev.format_change .dot {{ background: var(--purple); border-color: var(--purple); }}
   .tl-ev.change .dot {{ background: var(--yellow); border-color: var(--yellow); }}
 
-  .ev-card {{
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 12px 16px;
-    transition: box-shadow 0.2s;
-  }}
-
+  .ev-card {{ background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; transition: box-shadow 0.2s; }}
   .ev-card:hover {{ box-shadow: 0 2px 8px rgba(0,0,0,0.05); }}
-
-  .ev-date {{
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.68rem;
-    color: var(--dim);
-    margin-bottom: 3px;
-  }}
-
+  .ev-date {{ font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; color: var(--dim); margin-bottom: 3px; }}
   .ev-lbl {{ font-size: 0.88rem; font-weight: 700; margin-bottom: 6px; }}
-
   .tl-ev.initial .ev-lbl {{ color: var(--accent); }}
   .tl-ev.closed .ev-lbl {{ color: var(--red); }}
   .tl-ev.reopened .ev-lbl {{ color: var(--green); }}
@@ -819,132 +684,35 @@ html = f"""<!DOCTYPE html>
   .tl-ev.format_change .ev-lbl {{ color: var(--purple); }}
   .tl-ev.change .ev-lbl {{ color: var(--yellow); }}
 
-  .ch-row {{
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 4px 0;
-    font-size: 0.76rem;
-    border-bottom: 1px solid var(--border-lt);
-  }}
-
+  .ch-row {{ display: flex; align-items: center; gap: 7px; padding: 4px 0; font-size: 0.76rem; border-bottom: 1px solid var(--border-lt); }}
   .ch-row:last-child {{ border-bottom: none; }}
-
-  .ch-f {{
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.68rem;
-    color: var(--muted);
-    min-width: 100px;
-    font-weight: 600;
-  }}
-
-  .ch-old {{
-    color: var(--red);
-    background: var(--red-bg);
-    padding: 1px 6px;
-    border-radius: 3px;
-    font-size: 0.7rem;
-    text-decoration: line-through;
-  }}
-
+  .ch-f {{ font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; color: var(--muted); min-width: 100px; font-weight: 600; }}
+  .ch-old {{ color: var(--red); background: var(--red-bg); padding: 1px 6px; border-radius: 3px; font-size: 0.7rem; text-decoration: line-through; }}
   .ch-arr {{ color: var(--dim); font-size: 0.7rem; }}
-
-  .ch-new {{
-    color: var(--green);
-    background: var(--green-bg);
-    padding: 1px 6px;
-    border-radius: 3px;
-    font-size: 0.7rem;
-    font-weight: 600;
-  }}
-
-  .st-grid {{
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    gap: 3px 14px;
-    margin-top: 4px;
-  }}
-
+  .ch-new {{ color: var(--green); background: var(--green-bg); padding: 1px 6px; border-radius: 3px; font-size: 0.7rem; font-weight: 600; }}
+  .st-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 3px 14px; margin-top: 4px; }}
   .st-item {{ display: flex; justify-content: space-between; padding: 2px 0; font-size: 0.72rem; }}
   .st-k {{ color: var(--dim); font-family: 'JetBrains Mono', monospace; font-size: 0.66rem; }}
   .st-v {{ font-weight: 500; }}
 
-  /* ===== TAB 3 — NOVÉ FORMÁTY ===== */
-  #tabFormats {{
-    padding: 28px 32px;
-    max-width: 1200px;
-    margin: 0 auto;
-  }}
+  #tabFormats {{ padding: 28px 32px; max-width: 1200px; margin: 0 auto; }}
 
-  .fmt-branch-list {{
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
-    margin-top: 4px;
-  }}
-
+  .fmt-branch-list {{ display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }}
   .fmt-branch-pill {{
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    background: var(--purple-bg);
-    border: 1px solid #ddd6fe;
-    border-radius: 14px;
-    padding: 3px 10px;
-    font-size: 0.7rem;
-    color: var(--purple);
+    display: inline-flex; align-items: center; gap: 5px;
+    background: var(--purple-bg); border: 1px solid #ddd6fe;
+    border-radius: 14px; padding: 3px 10px; font-size: 0.7rem; color: var(--purple);
   }}
-
-  .fmt-branch-pill .pcode {{
-    font-family: 'JetBrains Mono', monospace;
-    font-weight: 700;
-    font-size: 0.68rem;
-  }}
-
-  .fmt-branch-pill .pfmt {{
-    background: var(--purple);
-    color: #fff;
-    border-radius: 8px;
-    padding: 1px 6px;
-    font-size: 0.63rem;
-    font-weight: 600;
-  }}
-
-  .fmt-row-toggle {{
-    cursor: pointer;
-    user-select: none;
-  }}
-
+  .fmt-branch-pill .pcode {{ font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 0.68rem; }}
+  .fmt-branch-pill .pfmt {{ background: var(--purple); color: #fff; border-radius: 8px; padding: 1px 6px; font-size: 0.63rem; font-weight: 600; }}
+  .fmt-row-toggle {{ cursor: pointer; user-select: none; }}
   .fmt-row-toggle:hover td {{ background: #f0ebff !important; }}
-
-  .fmt-detail-row td {{
-    padding: 0 !important;
-    border-bottom: 1px solid var(--border-lt);
-  }}
-
-  .fmt-detail-inner {{
-    padding: 10px 12px 14px 28px;
-    background: #faf8ff;
-  }}
-
-  .expand-icon {{
-    display: inline-block;
-    transition: transform 0.18s;
-    font-size: 0.65rem;
-    margin-left: 6px;
-    color: var(--dim);
-  }}
-
+  .fmt-detail-row td {{ padding: 0 !important; border-bottom: 1px solid var(--border-lt); }}
+  .fmt-detail-inner {{ padding: 10px 12px 14px 28px; background: #faf8ff; }}
+  .expand-icon {{ display: inline-block; transition: transform 0.18s; font-size: 0.65rem; margin-left: 6px; color: var(--dim); }}
   .expand-icon.open {{ transform: rotate(90deg); }}
 
-  .foot {{
-    text-align: center;
-    padding: 16px;
-    font-size: 0.7rem;
-    color: var(--dim);
-    border-top: 1px solid var(--border-lt);
-    margin-top: 20px;
-  }}
+  .foot {{ text-align: center; padding: 16px; font-size: 0.7rem; color: var(--dim); border-top: 1px solid var(--border-lt); margin-top: 20px; }}
 
   @media (max-width: 860px) {{
     #tabDetail.active {{ grid-template-columns: 1fr; }}
@@ -963,23 +731,16 @@ html = f"""<!DOCTYPE html>
   <button class="tab-btn" data-tab="tabFormats">Nové formáty</button>
 </div>
 
-<!-- ===== TAB 1 — PŘEHLED SÍTĚ ===== -->
 <div id="tabOverview" class="tab-content active">
-
   <div class="ov-header">
     <h1>Měsíční snapshoty pobočkové sítě</h1>
     <p>Stav sítě v čase — pouze pobočky s bns_flag = "Y"</p>
     <div class="range" id="rangeLabel"></div>
   </div>
-
   <div class="kpi-row" id="kpiRow"></div>
-
   <div class="chart-card">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap;gap:10px;">
-      <div>
-        <h2 style="margin-bottom:2px;">Poslední změny v síti</h2>
-        <div class="sub" style="margin-bottom:0;">Klíčové události napříč všemi pobočkami</div>
-      </div>
+      <div><h2 style="margin-bottom:2px;">Poslední změny v síti</h2><div class="sub" style="margin-bottom:0;">Klíčové události napříč všemi pobočkami</div></div>
       <div class="rc-tabs" id="rcTabs">
         <button class="rc-tab active" data-cat="all">Vše</button>
         <button class="rc-tab" data-cat="cashless">Cashless</button>
@@ -989,13 +750,9 @@ html = f"""<!DOCTYPE html>
     </div>
     <div id="recentChangesList"></div>
   </div>
-
   <div class="chart-card">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap;gap:10px;">
-      <div>
-        <h2 style="margin-bottom:2px;">Vývoj pobočkové sítě</h2>
-        <div class="sub" style="margin-bottom:0;">Starý formát (modrá) + nový formát (zelená) nahoře · zrušené pod osou (šedá) · cashless čárkovaná linie</div>
-      </div>
+      <div><h2 style="margin-bottom:2px;">Vývoj pobočkové sítě</h2><div class="sub" style="margin-bottom:0;">Starý formát (modrá) + nový formát (zelená) · zrušené pod osou (šedá) · cashless čárkovaná linie</div></div>
       <div class="rc-tabs" id="granTabs">
         <button class="rc-tab" data-gran="M">Měsíce</button>
         <button class="rc-tab active" data-gran="Q">Kvartály</button>
@@ -1004,52 +761,23 @@ html = f"""<!DOCTYPE html>
     </div>
     <div id="chartMain"></div>
   </div>
-
-  <div class="chart-card">
-    <h2>Cashless vs. s hotovostí</h2>
-    <div class="sub">Z otevřených poboček — podíl bezhotovostních</div>
-    <div id="chartCashless"></div>
-  </div>
-
-  <div class="chart-card">
-    <h2>Nový vs. starý formát</h2>
-    <div class="sub">Z otevřených poboček — přechod na nový formát</div>
-    <div id="chartFormat"></div>
-  </div>
-
-  <div class="chart-card">
-    <h2>Struktura sítě v čase</h2>
-    <div class="sub">Stacked columns — rozpad otevřených poboček</div>
-    <div id="chartStacked"></div>
-  </div>
-
+  <div class="chart-card"><h2>Cashless vs. s hotovostí</h2><div class="sub">Z otevřených poboček</div><div id="chartCashless"></div></div>
+  <div class="chart-card"><h2>Nový vs. starý formát</h2><div class="sub">Z otevřených poboček</div><div id="chartFormat"></div></div>
+  <div class="chart-card"><h2>Struktura sítě v čase</h2><div class="sub">Stacked columns — rozpad otevřených poboček</div><div id="chartStacked"></div></div>
   <div class="table-wrap">
     <h2>Všechny měsíční snapshoty</h2>
     <table id="historyTable">
-      <thead>
-        <tr>
-          <th>Měsíc</th><th>Celkem</th><th>Otevřené</th><th>Zavřené</th>
-          <th>Cashless</th><th>S hotovostí</th><th>Nový formát</th><th>Starý formát</th><th>Δ Otevřené</th>
-        </tr>
-      </thead>
+      <thead><tr><th>Měsíc</th><th>Celkem</th><th>Otevřené</th><th>Zavřené</th><th>Cashless</th><th>S hotovostí</th><th>Nový formát</th><th>Starý formát</th><th>Δ Otevřené</th></tr></thead>
       <tbody></tbody>
     </table>
   </div>
-
   <div class="foot">Vygenerováno automaticky — filtr: bns_flag = "Y"</div>
 </div>
 
-<!-- ===== TAB 2 — DETAIL POBOČKY ===== -->
 <div id="tabDetail" class="tab-content">
-
   <div class="side">
-    <div class="side-hdr">
-      <h2>Timeline poboček</h2>
-      <p>Historie změn stavů jednotlivých poboček</p>
-    </div>
-    <div class="search-box">
-      <input type="text" id="searchInput" placeholder="Hledat kód nebo název…">
-    </div>
+    <div class="side-hdr"><h2>Timeline poboček</h2><p>Historie změn stavů jednotlivých poboček</p></div>
+    <div class="search-box"><input type="text" id="searchInput" placeholder="Hledat kód nebo název…"></div>
     <div class="flt-bar">
       <button class="flt-btn active" data-filter="all">Vše</button>
       <button class="flt-btn" data-filter="has-changes">Se změnami</button>
@@ -1059,60 +787,44 @@ html = f"""<!DOCTYPE html>
     <div class="list-cnt" id="listCount"></div>
     <div class="b-list" id="branchList"></div>
   </div>
-
   <div class="detail" id="detailContent">
-    <div class="empty-st">
-      <div class="arr">◀</div>
-      <p>Vyberte pobočku ze seznamu vlevo</p>
-    </div>
+    <div class="empty-st"><div class="arr">◀</div><p>Vyberte pobočku ze seznamu vlevo</p></div>
   </div>
-
 </div>
 
-<!-- ===== TAB 3 — NOVÉ FORMÁTY ===== -->
 <div id="tabFormats" class="tab-content">
   <div class="ov-header">
     <h1>Adopce nových formátů</h1>
     <p>Pobočky, které přešly z prázdného formátu na nenulový — měsíční pohled</p>
   </div>
-
   <div class="kpi-row" id="fmtKpiRow"></div>
-
   <div class="chart-card">
     <h2>Měsíční přírůstek poboček s novým formátem</h2>
     <div class="sub">Počet poboček, které v daném měsíci poprvé dostaly formát (sloupce) · kumulativní součet (linie)</div>
     <div id="chartFmtAdoption"></div>
   </div>
-
   <div class="chart-card">
     <h2>Meziměsíční rozdíl (Δ přírůstku)</h2>
-    <div class="sub">Kladná hodnota = více poboček dostalo formát než minulý měsíc · záporná = méně</div>
+    <div class="sub">Zelená = více než minulý měsíc · Červená = méně</div>
     <div id="chartFmtDelta"></div>
   </div>
-
   <div class="table-wrap">
     <h2>Detail po měsících</h2>
     <table id="fmtTable">
-      <thead>
-        <tr>
-          <th>Měsíc</th>
-          <th style="text-align:right;">Přírůstek</th>
-          <th style="text-align:right;">Δ od min. měsíce</th>
-          <th style="text-align:right;">Kumulativní součet</th>
-          <th style="text-align:left;">Pobočky <span style="font-weight:400;color:var(--dim);">(klikněte pro rozbalení)</span></th>
-        </tr>
-      </thead>
+      <thead><tr>
+        <th>Měsíc</th>
+        <th style="text-align:right;">Přírůstek</th>
+        <th style="text-align:right;">Δ od min. měsíce</th>
+        <th style="text-align:right;">Kumulativní součet</th>
+        <th style="text-align:left;">Pobočky <span style="font-weight:400;color:var(--dim);">(klikněte pro rozbalení)</span></th>
+      </tr></thead>
       <tbody id="fmtTableBody"></tbody>
     </table>
   </div>
-
   <div class="foot">Filtr: bns_flag = "Y" · Pouze přechody formát: prázdný → nenulový</div>
 </div>
 
 <script>
-/* ============================================================ */
-/* TAB SWITCHING                                               */
-/* ============================================================ */
 let chartsRendered = false;
 let fmtChartsRendered = false;
 
@@ -1127,28 +839,22 @@ document.querySelectorAll('.tab-btn').forEach(btn => {{
   }});
 }});
 
-/* ============================================================ */
-/* TAB 1 — PŘEHLED SÍTĚ                                       */
-/* ============================================================ */
 const historyByGran = {history_all_json};
 const history = historyByGran['M'];
 const hLast = history[history.length - 1];
 const hPrev = history.length > 1 ? history[history.length - 2] : null;
 const hFirst = history[0];
 
-document.getElementById('rangeLabel').textContent =
-  hFirst.label + ' → ' + hLast.label + ' (' + history.length + ' záznamů)';
+document.getElementById('rangeLabel').textContent = hFirst.label + ' → ' + hLast.label + ' (' + history.length + ' záznamů)';
 
 function mkDelta(curr, old) {{
   if (old === null || old === undefined) return '<span class="delta neutral">—</span>';
   const d = curr - old;
   if (d === 0) return '<span class="delta neutral">beze změny</span>';
-  const cls = d > 0 ? 'up' : 'down';
-  const sign = d > 0 ? '+' : '';
-  return '<span class="delta ' + cls + '">' + sign + d + ' oproti min. záznamu</span>';
+  return '<span class="delta ' + (d > 0 ? 'up' : 'down') + '">' + (d > 0 ? '+' : '') + d + ' oproti min.</span>';
 }}
 
-const kpis = [
+document.getElementById('kpiRow').innerHTML = [
   {{ label: 'Celkem', value: hLast.total, color: 'var(--accent)', key: 'total' }},
   {{ label: 'Otevřené', value: hLast.opened, color: 'var(--green)', key: 'opened' }},
   {{ label: 'Zavřené', value: hLast.closed, color: 'var(--red)', key: 'closed' }},
@@ -1156,470 +862,234 @@ const kpis = [
   {{ label: 'S hotovostí', value: hLast.non_cashless, color: 'var(--blue)', key: 'non_cashless' }},
   {{ label: 'Nový formát', value: hLast.new_format, color: 'var(--purple)', key: 'new_format' }},
   {{ label: 'Starý formát', value: hLast.old_format, color: 'var(--teal)', key: 'old_format' }},
-];
+].map(k => '<div class="kpi" style="border-top-color:' + k.color + '"><div class="value" style="color:' + k.color + '">' + k.value + '</div><div class="label">' + k.label + '</div>' + mkDelta(k.value, hPrev ? hPrev[k.key] : null) + '</div>').join('');
 
-document.getElementById('kpiRow').innerHTML = kpis.map(k => {{
-  return '<div class="kpi" style="border-top-color:' + k.color + '">' +
-    '<div class="value" style="color:' + k.color + '">' + k.value + '</div>' +
-    '<div class="label">' + k.label + '</div>' +
-    mkDelta(k.value, hPrev ? hPrev[k.key] : null) +
-    '</div>';
-}}).join('');
-
-/* Poslední změny */
 const recentChangesByCat = {recent_changes_json};
 let activeRcCat = 'all';
-
-function fvRC(v) {{
-  if (v===null||v===undefined) return '—';
-  if (v===true) return 'Ano';
-  if (v===false) return 'Ne';
-  if (v===''||v==='nan') return '—';
-  return String(v);
-}}
-
-const fldLabelsRC = {{
-  branch_name:'Název', branch_type:'Typ', branch_closed:'Zavřeno',
-  cashless:'Cashless', format:'Formát', address:'Adresa', city:'Město', region:'Region',
-}};
-
+const fldLabelsRC = {{ branch_name:'Název', branch_type:'Typ', branch_closed:'Zavřeno', cashless:'Cashless', format:'Formát', address:'Adresa', city:'Město', region:'Region' }};
+function fvRC(v) {{ if(v===null||v===undefined) return '—'; if(v===true) return 'Ano'; if(v===false) return 'Ne'; if(v===''||v==='nan') return '—'; return String(v); }}
 function escRC(s) {{ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }}
 
 function renderRecentChanges() {{
-  const items = recentChangesByCat[activeRcCat] || [];
-  const shown = items.slice(0, 5);
-  const container = document.getElementById('recentChangesList');
-  if (shown.length === 0) {{
-    container.innerHTML = '<div style="color:var(--dim);font-size:0.8rem;padding:12px 0;text-align:center;">Žádné změny v této kategorii.</div>';
-    return;
-  }}
-  container.innerHTML = shown.map(c => {{
-    return '<div class="rc-item">' +
-      '<div class="rc-dot ' + c.category + '"></div>' +
-      '<div class="rc-body">' +
-        '<div class="rc-top">' +
-          '<span class="rc-date">' + c.date + '</span>' +
-          '<span class="rc-code">' + c.branch_code + '</span>' +
-          '<span class="rc-bname">' + escRC(c.branch_name) + '</span>' +
-          '<span class="rc-evlabel">' + escRC(c.label) + '</span>' +
-        '</div>' +
-        '<div class="rc-change">' +
-          '<span class="fld">' + (fldLabelsRC[c.field] || c.field) + '</span>' +
-          '<span class="old">' + escRC(fvRC(c.old)) + '</span>' +
-          '<span class="arr">→</span>' +
-          '<span class="new">' + escRC(fvRC(c.new)) + '</span>' +
-        '</div>' +
-      '</div>' +
-    '</div>';
-  }}).join('');
+  const shown = (recentChangesByCat[activeRcCat]||[]).slice(0,5);
+  const el = document.getElementById('recentChangesList');
+  if(!shown.length) {{ el.innerHTML='<div style="color:var(--dim);font-size:0.8rem;padding:12px 0;text-align:center;">Žádné změny.</div>'; return; }}
+  el.innerHTML = shown.map(c =>
+    '<div class="rc-item"><div class="rc-dot '+c.category+'"></div><div class="rc-body">'+
+    '<div class="rc-top"><span class="rc-date">'+c.date+'</span><span class="rc-code">'+c.branch_code+'</span>'+
+    '<span class="rc-bname">'+escRC(c.branch_name)+'</span><span class="rc-evlabel">'+escRC(c.label)+'</span></div>'+
+    '<div class="rc-change"><span class="fld">'+(fldLabelsRC[c.field]||c.field)+'</span>'+
+    '<span class="old">'+escRC(fvRC(c.old))+'</span><span class="arr">→</span><span class="new">'+escRC(fvRC(c.new))+'</span></div>'+
+    '</div></div>'
+  ).join('');
 }}
-
-document.querySelectorAll('#rcTabs .rc-tab').forEach(btn => {{
-  btn.addEventListener('click', () => {{
-    document.querySelectorAll('#rcTabs .rc-tab').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    activeRcCat = btn.dataset.cat;
-    renderRecentChanges();
-  }});
-}});
-
+document.querySelectorAll('#rcTabs .rc-tab').forEach(b => b.addEventListener('click', () => {{ document.querySelectorAll('#rcTabs .rc-tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); activeRcCat=b.dataset.cat; renderRecentChanges(); }}));
 renderRecentChanges();
 
 function renderCharts() {{
   chartsRendered = true;
-  const labels = history.map(h => h.label);
-
   function makeChart(el, series, colors, stacked) {{
     new ApexCharts(document.querySelector(el), {{
-      chart: {{
-        type: 'bar', height: 280, stacked: stacked || false,
-        fontFamily: 'DM Sans, sans-serif',
-        toolbar: {{ show: true }}, zoom: {{ enabled: true }},
-        animations: {{ enabled: true, easing: 'easeinout', speed: 400 }},
-      }},
-      series: series,
-      xaxis: {{ categories: labels, labels: {{ rotate: -45, style: {{ fontSize: '10px' }} }} }},
-      yaxis: {{ labels: {{ style: {{ fontSize: '11px' }} }}, min: 0 }},
-      colors: colors,
-      plotOptions: {{ bar: {{ columnWidth: '70%', borderRadius: 2, borderRadiusApplication: 'end', borderRadiusWhenStacked: 'last' }} }},
-      dataLabels: {{ enabled: history.length <= 12 }},
-      tooltip: {{ shared: true, intersect: false }},
-      legend: {{ position: 'top', fontSize: '12px' }},
-      grid: {{ borderColor: '#e8eaf0', strokeDashArray: 3 }},
+      chart: {{ type:'bar', height:280, stacked:stacked||false, fontFamily:'DM Sans,sans-serif', toolbar:{{show:true}}, animations:{{enabled:true,easing:'easeinout',speed:400}} }},
+      series, colors,
+      xaxis: {{ categories: history.map(h=>h.label), labels:{{rotate:-45,style:{{fontSize:'10px'}}}} }},
+      yaxis: {{ labels:{{style:{{fontSize:'11px'}}}}, min:0 }},
+      plotOptions: {{ bar:{{columnWidth:'70%',borderRadius:2,borderRadiusApplication:'end',borderRadiusWhenStacked:'last'}} }},
+      dataLabels: {{ enabled: history.length<=12 }},
+      tooltip: {{ shared:true, intersect:false }},
+      legend: {{ position:'top', fontSize:'12px' }},
+      grid: {{ borderColor:'#e8eaf0', strokeDashArray:3 }},
     }}).render();
   }}
 
-  window.mainChart = null;
   window.buildMainChartOptions = function(hist) {{
-    const labels = hist.map(h => h.label);
-    const showDL = hist.length <= 14;
     return {{
-      chart: {{
-        type: 'bar', height: 380, stacked: true,
-        fontFamily: 'DM Sans, sans-serif',
-        toolbar: {{ show: true }},
-        animations: {{ enabled: true, easing: 'easeinout', speed: 400 }},
-      }},
+      chart: {{ type:'bar', height:380, stacked:true, fontFamily:'DM Sans,sans-serif', toolbar:{{show:true}}, animations:{{enabled:true,easing:'easeinout',speed:400}} }},
       series: [
-        {{ name: 'Starý formát', type: 'bar', data: hist.map(h => h.old_format) }},
-        {{ name: 'Nový formát', type: 'bar', data: hist.map(h => h.new_format) }},
-        {{ name: 'Zrušené pobočky', type: 'bar', data: hist.map(h => -h.closed) }},
-        {{ name: 'Cashless', type: 'line', data: hist.map(h => h.cashless) }},
+        {{ name:'Starý formát', type:'bar', data:hist.map(h=>h.old_format) }},
+        {{ name:'Nový formát', type:'bar', data:hist.map(h=>h.new_format) }},
+        {{ name:'Zrušené', type:'bar', data:hist.map(h=>-h.closed) }},
+        {{ name:'Cashless', type:'line', data:hist.map(h=>h.cashless) }},
       ],
-      colors: ['#3b82f6', '#10b981', '#d1d5db', '#1e293b'],
-      stroke: {{ width: [0, 0, 0, 2.5], dashArray: [0, 0, 0, 6], curve: 'smooth' }},
-      plotOptions: {{ bar: {{ columnWidth: '65%', borderRadius: 2, borderRadiusApplication: 'end', borderRadiusWhenStacked: 'last' }} }},
-      xaxis: {{ categories: labels, labels: {{ rotate: -45, style: {{ fontSize: '10px' }} }}, axisBorder: {{ show: true, color: '#94a3b8' }} }},
-      yaxis: {{ labels: {{ style: {{ fontSize: '11px' }}, formatter: function(v) {{ return Math.abs(Math.round(v)); }} }} }},
-      dataLabels: {{
-        enabled: showDL,
-        formatter: function(val) {{
-          const v = Math.abs(Math.round(val));
-          if (v === 0) return '';
-          return val < 0 ? '-' + v : v;
-        }},
-        style: {{ fontSize: '10px', fontWeight: 700, colors: ['#fff', '#fff', '#64748b', '#1e293b'] }},
-        background: {{ enabled: true, foreColor: '#fff', borderRadius: 2, padding: 3, opacity: 0.85, borderWidth: 0 }},
-      }},
-      tooltip: {{ shared: true, intersect: false, y: {{ formatter: function(val) {{ return Math.abs(Math.round(val)); }} }} }},
-      legend: {{ position: 'top', fontSize: '12px', markers: {{ width: 10, height: 10, radius: 2 }} }},
-      grid: {{ borderColor: '#e8eaf0', strokeDashArray: 3 }},
+      colors: ['#3b82f6','#10b981','#d1d5db','#1e293b'],
+      stroke: {{ width:[0,0,0,2.5], dashArray:[0,0,0,6], curve:'smooth' }},
+      plotOptions: {{ bar:{{columnWidth:'65%',borderRadius:2,borderRadiusApplication:'end',borderRadiusWhenStacked:'last'}} }},
+      xaxis: {{ categories:hist.map(h=>h.label), labels:{{rotate:-45,style:{{fontSize:'10px'}}}}, axisBorder:{{show:true,color:'#94a3b8'}} }},
+      yaxis: {{ labels:{{style:{{fontSize:'11px'}},formatter:v=>Math.abs(Math.round(v))}} }},
+      dataLabels: {{ enabled:hist.length<=14, formatter:val=>{{const v=Math.abs(Math.round(val)); return v===0?'':(val<0?'-'+v:v);}}, style:{{fontSize:'10px',fontWeight:700,colors:['#fff','#fff','#64748b','#1e293b']}}, background:{{enabled:true,foreColor:'#fff',borderRadius:2,padding:3,opacity:0.85,borderWidth:0}} }},
+      tooltip: {{ shared:true, intersect:false, y:{{formatter:val=>Math.abs(Math.round(val))}} }},
+      legend: {{ position:'top', fontSize:'12px', markers:{{width:10,height:10,radius:2}} }},
+      grid: {{ borderColor:'#e8eaf0', strokeDashArray:3 }},
       annotations: {{
-        yaxis: [{{ y: 0, borderColor: '#94a3b8', strokeDashArray: 0, borderWidth: 1 }}],
-        points: hist.map((h) => ({{
-          x: h.label, y: h.opened, seriesIndex: 1,
-          marker: {{ size: 0 }},
-          label: {{
-            text: String(h.opened), borderColor: 'transparent', borderWidth: 0, borderRadius: 3,
-            style: {{ background: 'transparent', color: '#1e293b', fontSize: '11px', fontWeight: 700, padding: {{ left: 4, right: 4, top: 2, bottom: 2 }} }},
-            offsetY: -8,
-          }},
-        }})),
+        yaxis: [{{ y:0, borderColor:'#94a3b8', strokeDashArray:0, borderWidth:1 }}],
+        points: hist.map(h=>({{ x:h.label, y:h.opened, seriesIndex:1, marker:{{size:0}}, label:{{ text:String(h.opened), borderColor:'transparent', borderWidth:0, borderRadius:3, style:{{background:'transparent',color:'#1e293b',fontSize:'11px',fontWeight:700,padding:{{left:4,right:4,top:2,bottom:2}}}}, offsetY:-8 }} }})),
       }},
     }};
   }};
 
-  const initialHist = historyByGran['Q'];
-  window.mainChart = new ApexCharts(document.querySelector('#chartMain'), window.buildMainChartOptions(initialHist));
+  window.mainChart = new ApexCharts(document.querySelector('#chartMain'), window.buildMainChartOptions(historyByGran['Q']));
   window.mainChart.render();
 
-  makeChart('#chartCashless', [
-    {{ name: 'Cashless', data: history.map(h => h.cashless) }},
-    {{ name: 'S hotovostí', data: history.map(h => h.non_cashless) }},
-  ], ['#d97706', '#2563eb'], true);
-
-  makeChart('#chartFormat', [
-    {{ name: 'Nový formát', data: history.map(h => h.new_format) }},
-    {{ name: 'Starý formát', data: history.map(h => h.old_format) }},
-  ], ['#7c3aed', '#0d9488'], true);
-
+  makeChart('#chartCashless', [{{name:'Cashless',data:history.map(h=>h.cashless)}},{{name:'S hotovostí',data:history.map(h=>h.non_cashless)}}], ['#d97706','#2563eb'], true);
+  makeChart('#chartFormat', [{{name:'Nový formát',data:history.map(h=>h.new_format)}},{{name:'Starý formát',data:history.map(h=>h.old_format)}}], ['#7c3aed','#0d9488'], true);
   makeChart('#chartStacked', [
-    {{ name: 'Cashless + nový formát', data: history.map(h => Math.min(h.cashless, h.new_format)) }},
-    {{ name: 'Cashless + starý formát', data: history.map(h => Math.max(0, h.cashless - h.new_format)) }},
-    {{ name: 'Hotovost + nový formát', data: history.map(h => Math.max(0, h.new_format - h.cashless)) }},
-    {{ name: 'Hotovost + starý formát', data: history.map(h => h.old_format) }},
-  ], ['#f59e0b', '#ef4444', '#8b5cf6', '#6b7280'], true);
+    {{name:'Cashless+nový',data:history.map(h=>Math.min(h.cashless,h.new_format))}},
+    {{name:'Cashless+starý',data:history.map(h=>Math.max(0,h.cashless-h.new_format))}},
+    {{name:'Hotovost+nový',data:history.map(h=>Math.max(0,h.new_format-h.cashless))}},
+    {{name:'Hotovost+starý',data:history.map(h=>h.old_format)}},
+  ], ['#f59e0b','#ef4444','#8b5cf6','#6b7280'], true);
 }}
 
 const tbody = document.querySelector('#historyTable tbody');
-history.slice().reverse().forEach((h, i) => {{
-  const rev = history.slice().reverse();
-  const prevH = i < rev.length - 1 ? rev[i + 1] : null;
-  const dOpen = prevH ? h.opened - prevH.opened : 0;
-  const dClass = dOpen > 0 ? 'up' : dOpen < 0 ? 'down' : 'neutral';
-  const dSign = dOpen > 0 ? '+' : '';
+history.slice().reverse().forEach((h,i,arr) => {{
+  const prevH = i < arr.length-1 ? arr[i+1] : null;
+  const dOpen = prevH ? h.opened-prevH.opened : 0;
   const tr = document.createElement('tr');
-  if (h.is_current) tr.className = 'is-current';
-  tr.innerHTML =
-    '<td>' + h.label + '</td><td>' + h.total + '</td>' +
-    '<td><strong>' + h.opened + '</strong></td><td>' + h.closed + '</td>' +
-    '<td>' + h.cashless + '</td><td>' + h.non_cashless + '</td>' +
-    '<td>' + h.new_format + '</td><td>' + h.old_format + '</td>' +
-    '<td><span class="delta ' + dClass + '">' + (prevH ? dSign + dOpen : '—') + '</span></td>';
+  if(h.is_current) tr.className='is-current';
+  tr.innerHTML = '<td>'+h.label+'</td><td>'+h.total+'</td><td><strong>'+h.opened+'</strong></td><td>'+h.closed+'</td><td>'+h.cashless+'</td><td>'+h.non_cashless+'</td><td>'+h.new_format+'</td><td>'+h.old_format+'</td><td><span class="delta '+(dOpen>0?'up':dOpen<0?'down':'neutral')+'">'+(prevH?(dOpen>0?'+':'')+dOpen:'—')+'</span></td>';
   tbody.appendChild(tr);
 }});
 
 renderCharts();
 
-document.querySelectorAll('#granTabs .rc-tab').forEach(btn => {{
-  btn.addEventListener('click', () => {{
-    document.querySelectorAll('#granTabs .rc-tab').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    const gran = btn.dataset.gran;
-    const hist = historyByGran[gran] || [];
-    if (window.mainChart && hist.length > 0) {{
-      window.mainChart.updateOptions(window.buildMainChartOptions(hist), true, true);
-    }}
-  }});
-}});
+document.querySelectorAll('#granTabs .rc-tab').forEach(b => b.addEventListener('click', () => {{
+  document.querySelectorAll('#granTabs .rc-tab').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  const hist = historyByGran[b.dataset.gran]||[];
+  if(window.mainChart && hist.length) window.mainChart.updateOptions(window.buildMainChartOptions(hist),true,true);
+}}));
 
-/* ============================================================ */
-/* TAB 2 — DETAIL POBOČKY                                     */
-/* ============================================================ */
 const branches = {branches_json};
-let activeFilter = 'all';
-let activeCode = null;
-
-const searchInput = document.getElementById('searchInput');
-const branchList = document.getElementById('branchList');
-const detailContent = document.getElementById('detailContent');
-const listCount = document.getElementById('listCount');
-
-const fldLabels = {{
-  branch_name:'Název', branch_type:'Typ', branch_closed:'Zavřeno',
-  cashless:'Cashless', format:'Formát', address:'Adresa', city:'Město', region:'Region',
-}};
-
-function fv(v) {{
-  if (v===null||v===undefined) return '—';
-  if (v===true) return 'Ano';
-  if (v===false) return 'Ne';
-  if (v===''||v==='nan') return '—';
-  return String(v);
-}}
-
-function esc(s) {{ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }}
+let activeFilter='all', activeCode=null;
+const searchInput=document.getElementById('searchInput');
+const branchList=document.getElementById('branchList');
+const detailContent=document.getElementById('detailContent');
+const listCount=document.getElementById('listCount');
+const fldLabels={{ branch_name:'Název',branch_type:'Typ',branch_closed:'Zavřeno',cashless:'Cashless',format:'Formát',address:'Adresa',city:'Město',region:'Region' }};
+function fv(v){{ if(v===null||v===undefined)return'—'; if(v===true)return'Ano'; if(v===false)return'Ne'; if(v===''||v==='nan')return'—'; return String(v); }}
+function esc(s){{ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }}
 
 function filterBranches() {{
-  const q = searchInput.value.toLowerCase().trim();
-  return branches.filter(b => {{
-    if (q && !String(b.code).includes(q) && !b.name.toLowerCase().includes(q)) return false;
-    const last = b.events[b.events.length-1];
-    if (activeFilter==='has-changes' && b.total_changes===0) return false;
-    if (activeFilter==='closed' && !last.state.branch_closed) return false;
-    if (activeFilter==='cashless' && !last.state.cashless) return false;
+  const q=searchInput.value.toLowerCase().trim();
+  return branches.filter(b=>{{
+    if(q && !String(b.code).includes(q) && !b.name.toLowerCase().includes(q)) return false;
+    const last=b.events[b.events.length-1];
+    if(activeFilter==='has-changes' && b.total_changes===0) return false;
+    if(activeFilter==='closed' && !last.state.branch_closed) return false;
+    if(activeFilter==='cashless' && !last.state.cashless) return false;
     return true;
   }});
 }}
 
 function renderList() {{
-  const filtered = filterBranches();
-  listCount.textContent = filtered.length + ' poboček';
-  branchList.innerHTML = filtered.map(b => {{
-    const last = b.events[b.events.length-1];
-    const cls = activeCode===b.code?' active':'';
-    const dc = last.state.branch_closed?'closed':'open';
-    const st = last.state.branch_closed?'zavřena':'otevřena';
-    const ct = last.state.cashless?' · cashless':'';
-    return '<div class="b-item'+cls+'" data-code="'+b.code+'">' +
-      '<div class="code">'+b.code+'</div>' +
-      '<div class="name">'+esc(b.name)+'</div>' +
-      '<div class="meta"><span class="badge">'+b.total_changes+' změn</span>' +
-      '<span class="sdot '+dc+'"></span> '+st+ct+'</div></div>';
+  const filtered=filterBranches();
+  listCount.textContent=filtered.length+' poboček';
+  branchList.innerHTML=filtered.map(b=>{{
+    const last=b.events[b.events.length-1];
+    const cls=activeCode===b.code?' active':'';
+    const dc=last.state.branch_closed?'closed':'open';
+    return '<div class="b-item'+cls+'" data-code="'+b.code+'"><div class="code">'+b.code+'</div><div class="name">'+esc(b.name)+'</div><div class="meta"><span class="badge">'+b.total_changes+' změn</span><span class="sdot '+dc+'"></span> '+(last.state.branch_closed?'zavřena':'otevřena')+(last.state.cashless?' · cashless':'')+'</div></div>';
   }}).join('');
-  branchList.querySelectorAll('.b-item').forEach(el => {{
-    el.addEventListener('click', () => {{
-      activeCode = parseInt(el.dataset.code);
-      renderList();
-      renderTimeline();
-    }});
-  }});
+  branchList.querySelectorAll('.b-item').forEach(el=>el.addEventListener('click',()=>{{activeCode=parseInt(el.dataset.code);renderList();renderTimeline();}}));
 }}
 
 function renderTimeline() {{
-  const br = branches.find(b => b.code===activeCode);
-  if (!br) return;
-  const ls = br.events[br.events.length-1].state;
-  const hf = ls.format && ls.format!=='' && ls.format!=='nan';
-
-  let h = '<div class="br-hdr"><div class="top"><span class="bcode">'+br.code+'</span>' +
-    '<h2>'+esc(br.name)+'</h2></div><div class="chips">' +
-    (ls.branch_closed?'<span class="chip closed">● Zavřena</span>':'<span class="chip open">● Otevřena</span>') +
-    (ls.cashless?'<span class="chip cashless">Cashless</span>':'<span class="chip cash">S hotovostí</span>') +
-    (hf?'<span class="chip nfmt">Formát: '+esc(ls.format)+'</span>':'<span class="chip ofmt">Bez nového formátu</span>') +
-    '</div><div class="sum-txt">'+br.events.length+' záznamů · '+br.total_changes+' změn · ' +
-    br.events[0].date+' → '+br.events[br.events.length-1].date+'</div></div>';
-
-  h += '<div class="tl">';
-  br.events.forEach((evt, idx) => {{
-    const dl = Math.min(idx*0.04,0.5);
-    h += '<div class="tl-ev '+evt.type+'" style="animation-delay:'+dl+'s">' +
-      '<div class="dot"></div><div class="ev-card">' +
-      '<div class="ev-date">'+evt.date+'</div>' +
-      '<div class="ev-lbl">'+esc(evt.label)+'</div>';
-    if (evt.type==='initial') {{
-      h += '<div class="st-grid">';
-      for (const [k,v] of Object.entries(evt.state)) {{
-        h += '<div class="st-item"><span class="st-k">'+(fldLabels[k]||k)+'</span><span class="st-v">'+esc(fv(v))+'</span></div>';
-      }}
-      h += '</div>';
-    }} else if (evt.changes.length>0) {{
-      evt.changes.forEach(ch => {{
-        h += '<div class="ch-row"><span class="ch-f">'+(fldLabels[ch.field]||ch.field)+'</span>' +
-          '<span class="ch-old">'+esc(fv(ch.old))+'</span>' +
-          '<span class="ch-arr">→</span>' +
-          '<span class="ch-new">'+esc(fv(ch.new))+'</span></div>';
-      }});
+  const br=branches.find(b=>b.code===activeCode); if(!br) return;
+  const ls=br.events[br.events.length-1].state;
+  const hf=ls.format&&ls.format!==''&&ls.format!=='nan';
+  let h='<div class="br-hdr"><div class="top"><span class="bcode">'+br.code+'</span><h2>'+esc(br.name)+'</h2></div><div class="chips">'+(ls.branch_closed?'<span class="chip closed">● Zavřena</span>':'<span class="chip open">● Otevřena</span>')+(ls.cashless?'<span class="chip cashless">Cashless</span>':'<span class="chip cash">S hotovostí</span>')+(hf?'<span class="chip nfmt">Formát: '+esc(ls.format)+'</span>':'<span class="chip ofmt">Bez formátu</span>')+'</div><div class="sum-txt">'+br.events.length+' záznamů · '+br.total_changes+' změn · '+br.events[0].date+' → '+br.events[br.events.length-1].date+'</div></div>';
+  h+='<div class="tl">';
+  br.events.forEach((evt,idx)=>{{
+    const dl=Math.min(idx*0.04,0.5);
+    h+='<div class="tl-ev '+evt.type+'" style="animation-delay:'+dl+'s"><div class="dot"></div><div class="ev-card"><div class="ev-date">'+evt.date+'</div><div class="ev-lbl">'+esc(evt.label)+'</div>';
+    if(evt.type==='initial'){{
+      h+='<div class="st-grid">';
+      for(const [k,v] of Object.entries(evt.state)) h+='<div class="st-item"><span class="st-k">'+(fldLabels[k]||k)+'</span><span class="st-v">'+esc(fv(v))+'</span></div>';
+      h+='</div>';
+    }} else if(evt.changes.length) {{
+      evt.changes.forEach(ch=>{{ h+='<div class="ch-row"><span class="ch-f">'+(fldLabels[ch.field]||ch.field)+'</span><span class="ch-old">'+esc(fv(ch.old))+'</span><span class="ch-arr">→</span><span class="ch-new">'+esc(fv(ch.new))+'</span></div>'; }});
     }}
-    h += '</div></div>';
+    h+='</div></div>';
   }});
-  h += '</div><div class="foot">filtr: bns_flag = "Y"</div>';
-  detailContent.innerHTML = h;
+  h+='</div><div class="foot">filtr: bns_flag = "Y"</div>';
+  detailContent.innerHTML=h;
 }}
 
-searchInput.addEventListener('input', renderList);
-document.querySelectorAll('.flt-btn').forEach(btn => {{
-  btn.addEventListener('click', () => {{
-    document.querySelectorAll('.flt-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    activeFilter = btn.dataset.filter;
-    renderList();
-  }});
-}});
-
+searchInput.addEventListener('input',renderList);
+document.querySelectorAll('.flt-btn').forEach(b=>b.addEventListener('click',()=>{{document.querySelectorAll('.flt-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');activeFilter=b.dataset.filter;renderList();}}));
 renderList();
 
-/* ============================================================ */
-/* TAB 3 — NOVÉ FORMÁTY                                       */
-/* ============================================================ */
 const fmtData = {format_monthly_json};
 
 function renderFmtCharts() {{
-  fmtChartsRendered = true;
+  fmtChartsRendered=true;
+  if(!fmtData.length) {{ document.getElementById('fmtKpiRow').innerHTML='<div style="color:var(--dim);padding:20px;text-align:center;">Žádné přechody na nový formát.</div>'; return; }}
+  const total=fmtData.reduce((s,m)=>s+m.count,0);
+  const maxM=fmtData.reduce((a,b)=>b.count>a.count?b:a);
+  const avg=(total/fmtData.length).toFixed(1);
+  document.getElementById('fmtKpiRow').innerHTML=[
+    {{label:'Celkem přechodů',value:total,color:'var(--purple)'}},
+    {{label:'Měsíců s přechody',value:fmtData.length,color:'var(--accent)'}},
+    {{label:'Ø za měsíc',value:avg,color:'var(--teal)'}},
+    {{label:'Nejakt. měsíc',value:maxM.month,sub:maxM.count+' poboček',color:'var(--orange)'}},
+  ].map(k=>'<div class="kpi" style="border-top-color:'+k.color+'"><div class="value" style="color:'+k.color+';font-size:'+(String(k.value).length>6?'1.1rem':'1.6rem')+'">'+k.value+'</div><div class="label">'+k.label+'</div>'+(k.sub?'<div class="delta neutral">'+k.sub+'</div>':'')+'</div>').join('');
 
-  if (fmtData.length === 0) {{
-    document.getElementById('fmtKpiRow').innerHTML =
-      '<div style="color:var(--dim);padding:20px;text-align:center;">Žádné přechody na nový formát nebyly nalezeny.</div>';
-    return;
-  }}
+  const labels=fmtData.map(m=>m.month);
+  const counts=fmtData.map(m=>m.count);
+  const cumulative=counts.reduce((acc,v)=>{{acc.push((acc.length?acc[acc.length-1]:0)+v);return acc;}},[]);
+  const deltas=counts.map((v,i)=>i===0?0:v-counts[i-1]);
 
-  const totalTransitions = fmtData.reduce((s, m) => s + m.count, 0);
-  const maxMonth = fmtData.reduce((a, b) => b.count > a.count ? b : a);
-  const activeMonths = fmtData.length;
-  const avgPerMonth = (totalTransitions / activeMonths).toFixed(1);
-
-  document.getElementById('fmtKpiRow').innerHTML = [
-    {{ label: 'Celkem přechodů', value: totalTransitions, color: 'var(--purple)' }},
-    {{ label: 'Měsíců s přechody', value: activeMonths, color: 'var(--accent)' }},
-    {{ label: 'Ø za měsíc', value: avgPerMonth, color: 'var(--teal)' }},
-    {{ label: 'Nejakt. měsíc', value: maxMonth.month, sub: maxMonth.count + ' poboček', color: 'var(--orange)' }},
-  ].map(k => {{
-    return '<div class="kpi" style="border-top-color:' + k.color + '">' +
-      '<div class="value" style="color:' + k.color + '; font-size: ' + (String(k.value).length > 6 ? '1.1rem' : '1.6rem') + '">' + k.value + '</div>' +
-      '<div class="label">' + k.label + '</div>' +
-      (k.sub ? '<div class="delta neutral">' + k.sub + '</div>' : '') +
-      '</div>';
-  }}).join('');
-
-  const labels = fmtData.map(m => m.month);
-  const counts = fmtData.map(m => m.count);
-  const cumulative = counts.reduce((acc, v) => {{ acc.push((acc.length ? acc[acc.length-1] : 0) + v); return acc; }}, []);
-  const deltas = counts.map((v, i) => i === 0 ? null : v - counts[i-1]);
-
-  new ApexCharts(document.querySelector('#chartFmtAdoption'), {{
-    chart: {{
-      type: 'bar', height: 300,
-      fontFamily: 'DM Sans, sans-serif',
-      toolbar: {{ show: true }},
-      animations: {{ enabled: true, easing: 'easeinout', speed: 400 }},
-    }},
-    series: [
-      {{ name: 'Přírůstek', type: 'bar', data: counts }},
-      {{ name: 'Kumulativní', type: 'line', data: cumulative }},
-    ],
-    colors: ['#7c3aed', '#0891b2'],
-    stroke: {{ width: [0, 2.5], curve: 'smooth', dashArray: [0, 0] }},
-    plotOptions: {{ bar: {{ columnWidth: '60%', borderRadius: 3 }} }},
-    xaxis: {{ categories: labels, labels: {{ rotate: -45, style: {{ fontSize: '10px' }} }} }},
-    yaxis: [
-      {{ title: {{ text: 'Přírůstek', style: {{ fontSize: '11px' }} }}, min: 0 }},
-      {{ opposite: true, title: {{ text: 'Kumulativně', style: {{ fontSize: '11px' }} }}, min: 0 }},
-    ],
-    dataLabels: {{
-      enabled: fmtData.length <= 18,
-      enabledOnSeries: [0],
-      style: {{ fontSize: '10px', fontWeight: 700 }},
-      background: {{ enabled: true, borderRadius: 2, padding: 2, opacity: 0.85, borderWidth: 0 }},
-    }},
-    tooltip: {{ shared: true, intersect: false }},
-    legend: {{ position: 'top', fontSize: '12px' }},
-    grid: {{ borderColor: '#e8eaf0', strokeDashArray: 3 }},
+  new ApexCharts(document.querySelector('#chartFmtAdoption'),{{
+    chart:{{type:'bar',height:300,fontFamily:'DM Sans,sans-serif',toolbar:{{show:true}},animations:{{enabled:true,easing:'easeinout',speed:400}}}},
+    series:[{{name:'Přírůstek',type:'bar',data:counts}},{{name:'Kumulativní',type:'line',data:cumulative}}],
+    colors:['#7c3aed','#0891b2'],
+    stroke:{{width:[0,2.5],curve:'smooth'}},
+    plotOptions:{{bar:{{columnWidth:'60%',borderRadius:3}}}},
+    xaxis:{{categories:labels,labels:{{rotate:-45,style:{{fontSize:'10px'}}}}}},
+    yaxis:[{{title:{{text:'Přírůstek',style:{{fontSize:'11px'}}}},min:0}},{{opposite:true,title:{{text:'Kumulativně',style:{{fontSize:'11px'}}}},min:0}}],
+    dataLabels:{{enabled:fmtData.length<=18,enabledOnSeries:[0],style:{{fontSize:'10px',fontWeight:700}},background:{{enabled:true,borderRadius:2,padding:2,opacity:0.85,borderWidth:0}}}},
+    tooltip:{{shared:true,intersect:false}},
+    legend:{{position:'top',fontSize:'12px'}},
+    grid:{{borderColor:'#e8eaf0',strokeDashArray:3}},
   }}).render();
 
-  new ApexCharts(document.querySelector('#chartFmtDelta'), {{
-    chart: {{
-      type: 'bar', height: 220,
-      fontFamily: 'DM Sans, sans-serif',
-      toolbar: {{ show: false }},
-      animations: {{ enabled: true, easing: 'easeinout', speed: 400 }},
-    }},
-    series: [{{ name: 'Δ přírůstek', data: deltas.map(d => d === null ? 0 : d) }}],
-    plotOptions: {{
-      bar: {{
-        columnWidth: '60%', borderRadius: 2,
-        colors: {{
-          ranges: [
-            {{ from: -9999, to: -1, color: '#dc2626' }},
-            {{ from: 0, to: 0, color: '#94a3b8' }},
-            {{ from: 1, to: 9999, color: '#059669' }},
-          ]
-        }}
-      }}
-    }},
-    xaxis: {{ categories: labels, labels: {{ rotate: -45, style: {{ fontSize: '10px' }} }} }},
-    yaxis: {{ labels: {{ style: {{ fontSize: '11px' }}, formatter: v => (v > 0 ? '+' : '') + v }} }},
-    dataLabels: {{
-      enabled: fmtData.length <= 18,
-      formatter: v => (v > 0 ? '+' : '') + v,
-      style: {{ fontSize: '10px', fontWeight: 700 }},
-    }},
-    annotations: {{ yaxis: [{{ y: 0, borderColor: '#94a3b8', strokeDashArray: 0, borderWidth: 1 }}] }},
-    tooltip: {{ y: {{ formatter: v => (v > 0 ? '+' : '') + v + ' poboček' }} }},
-    grid: {{ borderColor: '#e8eaf0', strokeDashArray: 3 }},
+  new ApexCharts(document.querySelector('#chartFmtDelta'),{{
+    chart:{{type:'bar',height:220,fontFamily:'DM Sans,sans-serif',toolbar:{{show:false}},animations:{{enabled:true,easing:'easeinout',speed:400}}}},
+    series:[{{name:'Δ přírůstek',data:deltas}}],
+    plotOptions:{{bar:{{columnWidth:'60%',borderRadius:2,colors:{{ranges:[{{from:-9999,to:-1,color:'#dc2626'}},{{from:0,to:0,color:'#94a3b8'}},{{from:1,to:9999,color:'#059669'}}]}}}}}},
+    xaxis:{{categories:labels,labels:{{rotate:-45,style:{{fontSize:'10px'}}}}}},
+    yaxis:{{labels:{{style:{{fontSize:'11px'}},formatter:v=>(v>0?'+':'')+v}}}},
+    dataLabels:{{enabled:fmtData.length<=18,formatter:v=>(v>0?'+':'')+v,style:{{fontSize:'10px',fontWeight:700}}}},
+    annotations:{{yaxis:[{{y:0,borderColor:'#94a3b8',strokeDashArray:0,borderWidth:1}}]}},
+    tooltip:{{y:{{formatter:v=>(v>0?'+':'')+v+' poboček'}}}},
+    grid:{{borderColor:'#e8eaf0',strokeDashArray:3}},
   }}).render();
 
-  const fmtTbody = document.getElementById('fmtTableBody');
-  const reversed = fmtData.slice().reverse();
-  reversed.forEach((m, i) => {{
-    const origIdx = fmtData.length - 1 - i;
-    const delta = origIdx === 0 ? null : m.count - fmtData[origIdx - 1].count;
-    const cumul = cumulative[origIdx];
-    const dText = delta === null ? '—' : (delta > 0 ? '+' + delta : String(delta));
-    const dClass = delta === null ? 'neutral' : delta > 0 ? 'up' : delta < 0 ? 'down' : 'neutral';
-    const rowId = 'fmt-row-' + i;
-    const detailId = 'fmt-detail-' + i;
-
-    const pillsHtml = m.branches.map(b => {
-      return '<span class="fmt-branch-pill">' +
-        '<span class="pcode">' + b.branch_code + '</span>' +
-        esc(b.branch_name) +
-        '<span class="pfmt">' + esc(b.format_new) + '</span>' +
-        '</span>';
-    }).join('');
-
-    const tr = document.createElement('tr');
-    tr.className = 'fmt-row-toggle';
-    tr.id = rowId;
-    tr.innerHTML =
-      '<td style="text-align:left;font-family:monospace;font-size:0.8rem;">' + m.month + '</td>' +
-      '<td style="font-weight:700;color:var(--purple);">' + m.count + '</td>' +
-      '<td><span class="delta ' + dClass + '">' + dText + '</span></td>' +
-      '<td>' + cumul + '</td>' +
-      '<td style="text-align:left;color:var(--muted);font-size:0.75rem;">' +
-        m.branches.slice(0,3).map(b => '<span style="font-family:monospace;font-size:0.7rem;color:var(--accent);">' + b.branch_code + '</span>').join(' ') +
-        (m.count > 3 ? ' <span style="color:var(--dim);">+' + (m.count-3) + ' dalších</span>' : '') +
-        ' <span class="expand-icon" id="icon-' + i + '">▶</span>' +
-      '</td>';
-
-    const trDetail = document.createElement('tr');
-    trDetail.className = 'fmt-detail-row';
-    trDetail.id = detailId;
-    trDetail.style.display = 'none';
-    trDetail.innerHTML = '<td colspan="5"><div class="fmt-detail-inner"><div class="fmt-branch-list">' + pillsHtml + '</div></div></td>';
-
-    tr.addEventListener('click', () => {{
-      const isOpen = trDetail.style.display !== 'none';
-      trDetail.style.display = isOpen ? 'none' : 'table-row';
-      const icon = document.getElementById('icon-' + i);
-      if (icon) icon.classList.toggle('open', !isOpen);
+  const fmtTbody=document.getElementById('fmtTableBody');
+  fmtData.slice().reverse().forEach((m,i)=>{{
+    const origIdx=fmtData.length-1-i;
+    const delta=origIdx===0?null:m.count-fmtData[origIdx-1].count;
+    const cumul=cumulative[origIdx];
+    const dText=delta===null?'—':(delta>0?'+'+delta:String(delta));
+    const dClass=delta===null?'neutral':delta>0?'up':delta<0?'down':'neutral';
+    const pillsHtml=m.branches.map(b=>'<span class="fmt-branch-pill"><span class="pcode">'+b.branch_code+'</span>'+esc(b.branch_name)+'<span class="pfmt">'+esc(b.format_new)+'</span></span>').join('');
+    const tr=document.createElement('tr');
+    tr.className='fmt-row-toggle';
+    tr.innerHTML='<td style="font-family:monospace;font-size:0.8rem;">'+m.month+'</td><td style="font-weight:700;color:var(--purple);">'+m.count+'</td><td><span class="delta '+dClass+'">'+dText+'</span></td><td>'+cumul+'</td><td style="text-align:left;color:var(--muted);font-size:0.75rem;">'+m.branches.slice(0,3).map(b=>'<span style="font-family:monospace;font-size:0.7rem;color:var(--accent);">'+b.branch_code+'</span>').join(' ')+(m.count>3?' <span style="color:var(--dim);">+'+( m.count-3)+' dalších</span>':'')+' <span class="expand-icon" id="icon-'+i+'">▶</span></td>';
+    const trD=document.createElement('tr');
+    trD.className='fmt-detail-row'; trD.style.display='none';
+    trD.innerHTML='<td colspan="5"><div class="fmt-detail-inner"><div class="fmt-branch-list">'+pillsHtml+'</div></div></td>';
+    tr.addEventListener('click',()=>{{
+      const open=trD.style.display!=='none';
+      trD.style.display=open?'none':'table-row';
+      const ic=document.getElementById('icon-'+i);
+      if(ic) ic.classList.toggle('open',!open);
     }});
-
-    fmtTbody.appendChild(tr);
-    fmtTbody.appendChild(trDetail);
+    fmtTbody.appendChild(tr); fmtTbody.appendChild(trD);
   }});
 }}
 
-if (document.getElementById('tabFormats').classList.contains('active')) renderFmtCharts();
+if(document.getElementById('tabFormats').classList.contains('active')) renderFmtCharts();
 </script>
 </body>
 </html>"""
