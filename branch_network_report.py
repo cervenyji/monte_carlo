@@ -301,7 +301,7 @@ html = f"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pobočková síť ČS — Report</title>
-<script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+<script src="https://unpkg.com/apexcharts/dist/apexcharts.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,700&family=JetBrains+Mono:wght@400;600&display=swap');
 
@@ -1506,7 +1506,6 @@ function renderFmtCharts() {{
   const cumulative = counts.reduce((acc, v) => {{ acc.push((acc.length ? acc[acc.length-1] : 0) + v); return acc; }}, []);
   const deltas = counts.map((v, i) => i === 0 ? null : v - counts[i-1]);
 
-  // Graf 1: sloupce + kumulativní linie
   new ApexCharts(document.querySelector('#chartFmtAdoption'), {{
     chart: {{
       type: 'bar', height: 300,
@@ -1537,8 +1536,6 @@ function renderFmtCharts() {{
     grid: {{ borderColor: '#e8eaf0', strokeDashArray: 3 }},
   }}).render();
 
-  // Graf 2: delta sloupce (kladné zelené, záporné červené)
-  const deltaColors = deltas.map(d => d === null ? '#e5e7eb' : d > 0 ? '#059669' : d < 0 ? '#dc2626' : '#94a3b8');
   new ApexCharts(document.querySelector('#chartFmtDelta'), {{
     chart: {{
       type: 'bar', height: 220,
@@ -1547,11 +1544,6 @@ function renderFmtCharts() {{
       animations: {{ enabled: true, easing: 'easeinout', speed: 400 }},
     }},
     series: [{{ name: 'Δ přírůstek', data: deltas.map(d => d === null ? 0 : d) }}],
-    colors: ['#7c3aed'],
-    fill: {{
-      type: 'gradient',
-      gradient: {{ type: 'vertical', gradientToColors: ['#dc2626'], stops: [0, 100] }}
-    }},
     plotOptions: {{
       bar: {{
         columnWidth: '60%', borderRadius: 2,
@@ -1576,38 +1568,35 @@ function renderFmtCharts() {{
     grid: {{ borderColor: '#e8eaf0', strokeDashArray: 3 }},
   }}).render();
 
-  // Tabulka
   const fmtTbody = document.getElementById('fmtTableBody');
   const reversed = fmtData.slice().reverse();
   reversed.forEach((m, i) => {{
     const origIdx = fmtData.length - 1 - i;
     const delta = origIdx === 0 ? null : m.count - fmtData[origIdx - 1].count;
     const cumul = cumulative[origIdx];
-
     const dText = delta === null ? '—' : (delta > 0 ? '+' + delta : String(delta));
     const dClass = delta === null ? 'neutral' : delta > 0 ? 'up' : delta < 0 ? 'down' : 'neutral';
-
     const rowId = 'fmt-row-' + i;
     const detailId = 'fmt-detail-' + i;
 
-    const pillsHtml = m.branches.map(b => {{
+    const pillsHtml = m.branches.map(b => {
       return '<span class="fmt-branch-pill">' +
         '<span class="pcode">' + b.branch_code + '</span>' +
         esc(b.branch_name) +
         '<span class="pfmt">' + esc(b.format_new) + '</span>' +
         '</span>';
-    }}).join('');
+    }).join('');
 
     const tr = document.createElement('tr');
     tr.className = 'fmt-row-toggle';
     tr.id = rowId;
     tr.innerHTML =
-      '<td style="text-align:left; font-family: \'JetBrains Mono\', monospace; font-size:0.8rem;">' + m.month + '</td>' +
-      '<td style="font-weight:700; color:var(--purple);">' + m.count + '</td>' +
+      '<td style="text-align:left;font-family:monospace;font-size:0.8rem;">' + m.month + '</td>' +
+      '<td style="font-weight:700;color:var(--purple);">' + m.count + '</td>' +
       '<td><span class="delta ' + dClass + '">' + dText + '</span></td>' +
       '<td>' + cumul + '</td>' +
-      '<td style="text-align:left; color:var(--muted); font-size:0.75rem;">' +
-        m.branches.slice(0,3).map(b => '<span style="font-family:\'JetBrains Mono\',monospace;font-size:0.7rem;color:var(--accent);">' + b.branch_code + '</span>').join(' ') +
+      '<td style="text-align:left;color:var(--muted);font-size:0.75rem;">' +
+        m.branches.slice(0,3).map(b => '<span style="font-family:monospace;font-size:0.7rem;color:var(--accent);">' + b.branch_code + '</span>').join(' ') +
         (m.count > 3 ? ' <span style="color:var(--dim);">+' + (m.count-3) + ' dalších</span>' : '') +
         ' <span class="expand-icon" id="icon-' + i + '">▶</span>' +
       '</td>';
@@ -1630,7 +1619,6 @@ function renderFmtCharts() {{
   }});
 }}
 
-// Render format tab if it's the initial active tab (it's not, but just in case)
 if (document.getElementById('tabFormats').classList.contains('active')) renderFmtCharts();
 </script>
 </body>
