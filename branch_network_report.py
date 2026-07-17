@@ -8,35 +8,26 @@ import urllib.request
 
 df = pd.read_csv('in/tables/dbs_branch_network_epb.csv')
 
-# 1. Vyčištění dat
 df['branch_type'] = df['branch_type'].astype(str).str.strip()
 df['branch_code_clean'] = df['branch_code'].astype(int)
 
-# 2. Definice seznamů
 branch_types_y = ['BP', 'BZ', 'PP', 'UP', 'ZP']
 special_codes = [902, 904, 905, 906, 909, 919]
 
-# 3. Podmínka
 cond1 = (df['branch_code_clean'] >= 1) & (df['branch_code_clean'] <= 675) & (df['branch_type'].isin(branch_types_y))
 cond2 = (df['branch_code_clean'].isin(special_codes)) & (df['branch_type'] == 'PR')
 df['bns_flag'] = np.where(cond1 | cond2, 'Y', 'N')
 
-# === Příprava dat ===
 df["effective_date"] = pd.to_datetime(df["effective_date"])
 df_bns = df[df["bns_flag"] == "Y"].copy()
 df_bns = df_bns.sort_values(["branch_code", "effective_date"])
 
 has_nf_cols = ("branch_building_nf_sf" in df_bns.columns and "nf_number" in df_bns.columns)
 
-# =========================================================
-# ČÁST A — Měsíční snapshoty + aktuální stav
-# =========================================================
 df_bns["year_month"] = df_bns["effective_date"].dt.to_period("M")
 all_months = sorted(df_bns["year_month"].unique())
 
 def is_new_format_mask(df_sub):
-    """Maska pro pobočky splňující podmínky nového formátu:
-    branch_building_nf_sf == 'NF'  AND  format vyplnněný  AND  nf_number je číslo."""
     if not has_nf_cols:
         return df_sub["format"].notna() & (df_sub["format"].astype(str).str.strip() != "")
     nf_sf_ok = df_sub["branch_building_nf_sf"].astype(str).str.strip() == "NF"
@@ -101,11 +92,8 @@ if last_data_date < month_end_of_last:
     if snap:
         history.append(snap)
 
-print(f"📊 Zpracováno {len(history)} snapshotů (včetně aktuálního)")
+print(f"\U0001f4ca Zpracováno {len(history)} snapshotů (včetně aktuálního)")
 
-# =========================================================
-# ČÁST A.2 — Agregace na kvartály a roky
-# =========================================================
 def aggregate_history(history_rows, period):
     if not history_rows:
         return []
@@ -132,11 +120,8 @@ history_monthly = history
 history_quarterly = aggregate_history(history, "Q")
 history_yearly = aggregate_history(history, "Y")
 
-print(f"📊 Agregace: M={len(history_monthly)}, Q={len(history_quarterly)}, Y={len(history_yearly)}")
+print(f"\U0001f4ca Agregace: M={len(history_monthly)}, Q={len(history_quarterly)}, Y={len(history_yearly)}")
 
-# =========================================================
-# ČÁST B — Detail poboček (timeline změn)
-# =========================================================
 tracked_cols = [
     "branch_name", "branch_type", "branch_closed", "cashless",
     "format", "branch_building_nf_sf", "nf_number", "address", "city", "region"
@@ -146,7 +131,7 @@ tracked_cols = [c for c in tracked_cols if c in df_bns.columns]
 branches_data = {}
 for code, grp in df_bns.groupby("branch_code"):
     grp = grp.sort_values("effective_date").reset_index(drop=True)
-    branch_name = str(grp["branch_name"].iloc[-1]) if "branch_name" in grp.columns else f"Pobočka {code}"
+    branch_name = str(grp["branch_name"].iloc[-1]) if "branch_name" in grp.columns else f"Pobčka {code}"
     events = []
     prev_row = None
     for i, row in grp.iterrows():
@@ -185,8 +170,8 @@ for code, grp in df_bns.groupby("branch_code"):
                 evt_type = "change"; label = "Změna"
                 for ch in changes:
                     if ch["field"] == "branch_closed":
-                        if ch["new"] == True: evt_type = "closed"; label = "Pobočka zavřena"
-                        elif ch["new"] == False: evt_type = "reopened"; label = "Pobočka znovu otevřena"
+                        if ch["new"] == True: evt_type = "closed"; label = "Pobčka zavřena"
+                        elif ch["new"] == False: evt_type = "reopened"; label = "Pobčka znovu otevřena"
                     elif ch["field"] == "cashless":
                         if ch["new"] == True: evt_type = "cashless"; label = "Přechod na cashless"
                         elif ch["new"] == False: evt_type = "cash_added"; label = "Vrácena hotovost"
@@ -197,11 +182,8 @@ for code, grp in df_bns.groupby("branch_code"):
     branches_data[int(code)] = {"code": int(code), "name": branch_name, "events": events, "total_changes": len(events) - 1}
 
 sorted_branches = sorted(branches_data.values(), key=lambda b: b["code"])
-print(f"✅ Připraveno {len(sorted_branches)} poboček pro timeline")
+print(f"✅ Připraveno {len(sorted_branches)} pobček pro timeline")
 
-# =========================================================
-# ČÁST B.2 — Posledních N změn napříč sítí
-# =========================================================
 def categorize_change(field, old_val, new_val):
     if field == "cashless":
         if new_val is True: return ("cashless", "Přechod na cashless")
@@ -210,8 +192,8 @@ def categorize_change(field, old_val, new_val):
         if new_val and str(new_val) not in ("", "nan", "None"):
             return ("format", f"Nový formát: {new_val}")
     elif field == "branch_closed":
-        if new_val is True: return ("closed", "Pobočka zavřena")
-        elif new_val is False: return ("closed", "Pobočka znovu otevřena")
+        if new_val is True: return ("closed", "Pobčka zavřena")
+        elif new_val is False: return ("closed", "Pobčka znovu otevřena")
     return None
 
 all_changes = []
@@ -243,12 +225,42 @@ recent_changes_by_cat = {
     "closed": [c for c in all_changes if c["category"] == "closed"][:10],
 }
 
-print(f"🔔 Změny připraveny: all={len(recent_changes_by_cat['all'])}, cashless={len(recent_changes_by_cat['cashless'])}, format={len(recent_changes_by_cat['format'])}, closed={len(recent_changes_by_cat['closed'])}")
+print(f"\U0001f514 Změny připraveny: all={len(recent_changes_by_cat['all'])}, cashless={len(recent_changes_by_cat['cashless'])}, format={len(recent_changes_by_cat['format'])}, closed={len(recent_changes_by_cat['closed'])}")
 
-# =========================================================
-# Pomocná funkce — platí nový formát pro daný stav pobočky?
-# branch_building_nf_sf == "NF"  AND  format vyplnněný  AND  nf_number je číslo
-# =========================================================
+# Uzavrene pobocky
+closed_branches_data = []
+for code, bdata in branches_data.items():
+    evts = bdata["events"]
+    if not evts:
+        continue
+    last_state = evts[-1]["state"]
+    if not last_state.get("branch_closed"):
+        continue
+    close_date = evts[0]["date"]
+    for evt in evts:
+        for ch in evt.get("changes", []):
+            if ch["field"] == "branch_closed" and ch["new"] is True:
+                close_date = evt["date"]
+                break
+    closed_branches_data.append({
+        "branch_code": int(code),
+        "branch_name": bdata["name"],
+        "close_date": close_date,
+        "city": str(last_state.get("city") or ""),
+        "region": str(last_state.get("region") or ""),
+        "branch_type": str(last_state.get("branch_type") or ""),
+        "address": str(last_state.get("address") or ""),
+    })
+closed_branches_data.sort(key=lambda x: x["close_date"], reverse=True)
+
+# Vsechny zmeny po mesicich pro kalendar
+changes_by_month_cal = defaultdict(list)
+for ch in all_changes:
+    changes_by_month_cal[ch["date"][:7]].append(ch)
+
+print(f"\U0001f534 Uzavřených pobček: {len(closed_branches_data)}")
+print(f"\U0001f4c5 Měsíce s kalendářními událostmi: {len(changes_by_month_cal)}")
+
 def is_new_format_state(state):
     nf_sf  = state.get("branch_building_nf_sf")
     fmt    = state.get("format")
@@ -266,16 +278,12 @@ def is_new_format_state(state):
             pass
     return nf_sf_ok and fmt_ok and nf_num_ok
 
-# =========================================================
-# ČÁST C — Měsíční přírůstky poboček s novým formátem
-# Sledujeme přechod stavu: nebyl NF → je NF (všechny 3 podmínky splněny)
-# =========================================================
 format_transitions = []
 for code, bdata in branches_data.items():
     events = bdata["events"]
     for i, evt in enumerate(events):
         if i == 0:
-            continue  # přeskočíme počáteční stav
+            continue
         prev_nf = is_new_format_state(events[i - 1]["state"])
         curr_nf = is_new_format_state(evt["state"])
         if not prev_nf and curr_nf:
@@ -305,28 +313,24 @@ for m in all_fmt_months:
         "branches": branches_list,
     })
 
-print(f"🎨 Přechody na nový formát (NF+format+nf_number): {len(format_transitions)} celkem, {len(format_monthly_summary)} měsíců")
+print(f"\U0001f3a8 Přechody na nový formát: {len(format_transitions)} celkem, {len(format_monthly_summary)} měsíců")
 
-# =========================================================
-# STAŽENÍ APEXCHARTS — embed do HTML (funguje offline/file://)
-# =========================================================
 _apex_url = "https://cdn.jsdelivr.net/npm/apexcharts/dist/apexcharts.min.js"
 try:
     with urllib.request.urlopen(_apex_url, timeout=15) as _r:
         _apex_js = _r.read().decode("utf-8")
-    print(f"📦 ApexCharts stažen ({len(_apex_js)//1024} KB) — bude embedded inline")
+    print(f"\U0001f4e6 ApexCharts stažen ({len(_apex_js)//1024} KB) — bude embedded inline")
 except Exception as _e:
     _apex_js = None
     print(f"⚠️  ApexCharts se nepodařilo stáhnout ({_e}) — použije se CDN odkaz")
 
-# =========================================================
-# GENEROVÁNÍ JEDNOHO HTML
-# =========================================================
 history_json = json.dumps(history, ensure_ascii=False)
 history_all_json = json.dumps({"M": history_monthly, "Q": history_quarterly, "Y": history_yearly}, ensure_ascii=False)
 branches_json = json.dumps(sorted_branches, ensure_ascii=False)
 recent_changes_json = json.dumps(recent_changes_by_cat, ensure_ascii=False)
 format_monthly_json = json.dumps(format_monthly_summary, ensure_ascii=False)
+closed_branches_json = json.dumps(closed_branches_data, ensure_ascii=False)
+changes_by_month_json = json.dumps({k: v for k, v in changes_by_month_cal.items()}, ensure_ascii=False)
 
 REPORT_FILE = "branch_timeline_report.html"
 apex_script_tag = (
@@ -340,7 +344,7 @@ html = f"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pobočková síť ČS — Report</title>
+<title>Pobčková síť ČS — Report</title>
 {apex_script_tag}
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,700&family=JetBrains+Mono:wght@400;600&display=swap');
@@ -510,34 +514,82 @@ html = f"""<!DOCTYPE html>
   .fmt-detail-inner {{ padding:10px 12px 14px 28px; background:#faf8ff; }}
   .expand-icon {{ display:inline-block; transition:transform .18s; font-size:0.65rem; margin-left:6px; color:var(--dim); }}
   .expand-icon.open {{ transform:rotate(90deg); }}
+
+  /* Kalendar */
+  .cal-wrap {{ background:var(--card); border-radius:10px; padding:18px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,.05); }}
+  .cal-wrap h2 {{ font-size:0.95rem; margin-bottom:4px; }}
+  .cal-wrap .sub {{ font-size:0.75rem; color:var(--muted); margin-bottom:14px; }}
+  .cal-legend {{ display:flex; gap:14px; margin-bottom:12px; font-size:0.7rem; color:var(--muted); align-items:center; flex-wrap:wrap; }}
+  .cal-legend-dot {{ width:10px; height:10px; border-radius:3px; display:inline-block; margin-right:4px; }}
+  .cal-year {{ margin-bottom:10px; }}
+  .cal-year-label {{ font-size:0.78rem; font-weight:700; color:var(--muted); margin-bottom:5px; letter-spacing:.02em; }}
+  .cal-months {{ display:grid; grid-template-columns:repeat(12,1fr); gap:4px; }}
+  .cal-cell {{ border-radius:6px; padding:5px 4px; min-height:50px; border:1.5px solid var(--border-lt); background:var(--bg); transition:all .12s; position:relative; overflow:hidden; }}
+  .cal-cell.clickable {{ cursor:pointer; }}
+  .cal-cell.clickable:hover {{ border-color:var(--accent); transform:translateY(-1px); box-shadow:0 2px 8px rgba(0,0,0,.1); }}
+  .cal-cell.has-closed {{ background:var(--red-bg); border-color:#fca5a5; }}
+  .cal-cell.has-nf {{ background:var(--purple-bg); border-color:#c4b5fd; }}
+  .cal-cell.has-both {{ background:linear-gradient(145deg,#fef2f2 55%,#f5f3ff 55%); border-color:#fca5a5; }}
+  .cal-month-name {{ font-size:0.62rem; font-weight:700; color:var(--dim); margin-bottom:2px; }}
+  .cal-cell.has-closed .cal-month-name {{ color:var(--red); }}
+  .cal-cell.has-nf .cal-month-name {{ color:var(--purple); }}
+  .cal-cell.has-both .cal-month-name {{ color:var(--red); }}
+  .cal-codes {{ font-size:0.52rem; line-height:1.5; font-family:monospace; }}
+  .cal-codes .cc-red {{ color:#991b1b; }}
+  .cal-codes .cc-purple {{ color:#5b21b6; }}
+
+  /* Modal */
+  .modal-overlay {{ position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:500; display:flex; align-items:center; justify-content:center; padding:20px; }}
+  .modal-box {{ background:var(--card); border-radius:12px; padding:24px; max-width:580px; width:100%; max-height:82vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,.25); animation:modalIn .16s ease; }}
+  @keyframes modalIn {{ from {{ opacity:0; transform:scale(.97) translateY(6px); }} to {{ opacity:1; transform:none; }} }}
+  .modal-hdr {{ display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid var(--border); }}
+  .modal-hdr h3 {{ font-size:1.05rem; font-weight:700; }}
+  .modal-close {{ background:none; border:none; font-size:1.1rem; color:var(--muted); cursor:pointer; padding:3px 9px; border-radius:6px; line-height:1; transition:all .15s; }}
+  .modal-close:hover {{ background:var(--bg); color:var(--text); }}
+  .modal-section {{ margin-bottom:14px; }}
+  .modal-stitle {{ font-size:0.68rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; margin-bottom:6px; display:flex; align-items:center; gap:6px; }}
+  .modal-stitle .ms-dot {{ width:9px; height:9px; border-radius:50%; flex-shrink:0; }}
+  .modal-item {{ display:flex; gap:8px; align-items:center; padding:5px 0; border-bottom:1px solid var(--border-lt); font-size:0.78rem; }}
+  .modal-item:last-child {{ border-bottom:none; }}
+  .modal-code {{ font-family:monospace; font-size:0.7rem; font-weight:700; color:var(--accent); background:var(--accent-lt); padding:1px 6px; border-radius:4px; flex-shrink:0; }}
+  .modal-bname {{ font-weight:600; flex:1; }}
+  .modal-detail {{ color:var(--muted); font-size:0.7rem; }}
+
+  /* Uzavrene pobocky tab */
+  #tabClosed {{ padding:28px 32px; max-width:1100px; margin:0 auto; }}
+  .closed-date {{ font-family:'JetBrains Mono',monospace; font-size:0.78rem; font-weight:600; }}
+
   .foot {{ text-align:center; padding:16px; font-size:0.7rem; color:var(--dim); border-top:1px solid var(--border-lt); margin-top:20px; }}
   @media (max-width:860px) {{
     #tabDetail.active {{ grid-template-columns:1fr; }}
     .side {{ position:relative; height:auto; max-height:38vh; }}
     .detail {{ height:auto; }}
-    #tabOverview,#tabFormats {{ padding:20px 16px; }}
+    #tabOverview,#tabFormats,#tabClosed {{ padding:20px 16px; }}
+    .cal-months {{ grid-template-columns:repeat(6,1fr); }}
   }}
 </style>
 </head>
 <body>
 
 <div class="tab-nav">
-  <div class="brand">Pobočková síť ČS</div>
+  <div class="brand">Pobčková síť ČS</div>
   <button class="tab-btn active" data-tab="tabOverview">Přehled sítě</button>
-  <button class="tab-btn" data-tab="tabDetail">Detail pobočky</button>
+  <button class="tab-btn" data-tab="tabDetail">Detail pobčky</button>
   <button class="tab-btn" data-tab="tabFormats">Nové formáty</button>
+  <button class="tab-btn" data-tab="tabClosed">Uzavřené pobčky</button>
 </div>
 
 <div id="tabOverview" class="tab-content active">
   <div class="ov-header">
-    <h1>Měsíční snapshoty pobočkové sítě</h1>
-    <p>Stav sítě v čase — pouze pobočky s bns_flag = "Y"</p>
+    <h1>Měsíční snapshoty pobčkové sítě</h1>
+    <p>Stav sítě v čase — pouze pobčky s bns_flag = &quot;Y&quot;</p>
     <div class="range" id="rangeLabel"></div>
   </div>
+  <div id="calendarSection"></div>
   <div class="kpi-row" id="kpiRow"></div>
   <div class="chart-card">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap;gap:10px;">
-      <div><h2 style="margin-bottom:2px;">Poslední změny v síti</h2><div class="sub" style="margin-bottom:0;">Klíčové události napříč všemi pobočkami</div></div>
+      <div><h2 style="margin-bottom:2px;">Poslední změny v sítě</h2><div class="sub" style="margin-bottom:0;">Klíčové události napříč všemi pobčkami</div></div>
       <div class="rc-tabs" id="rcTabs">
         <button class="rc-tab active" data-cat="all">Vše</button>
         <button class="rc-tab" data-cat="cashless">Cashless</button>
@@ -549,17 +601,17 @@ html = f"""<!DOCTYPE html>
   </div>
   <div class="chart-card">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap;gap:10px;">
-      <div><h2 style="margin-bottom:2px;">Vývoj pobočkové sítě</h2><div class="sub" style="margin-bottom:0;">Starý formát (modrá) + NF (zelená) · zrušené pod osou · cashless linie</div></div>
+      <div><h2 style="margin-bottom:2px;">Vývoj pobčkové sítě</h2><div class="sub" style="margin-bottom:0;">Starý formát (modrá) + NF (zelená) · zrušené pod osou · cashless linie</div></div>
       <div class="rc-tabs" id="granTabs">
         <button class="rc-tab" data-gran="M">Měsíce</button>
-        <button class="rc-tab active" data-gran="Q">Kvartály</button>
+        <button class="rc-tab active" data-gran="Q">Kvarty</button>
         <button class="rc-tab" data-gran="Y">Roky</button>
       </div>
     </div>
     <div id="chartMain"></div>
   </div>
-  <div class="chart-card"><h2>Cashless vs. s hotovostí</h2><div class="sub">Z otevřených poboček</div><div id="chartCashless"></div></div>
-  <div class="chart-card"><h2>Nový formát (NF) vs. starý</h2><div class="sub">Z otevřených — NF = branch_building_nf_sf==NF &amp; format vyplnněný &amp; nf_number je číslo</div><div id="chartFormat"></div></div>
+  <div class="chart-card"><h2>Cashless vs. s hotovostí</h2><div class="sub">Z otevřených pobček</div><div id="chartCashless"></div></div>
+  <div class="chart-card"><h2>Nový formát (NF) vs. starý</h2><div class="sub">Z otevřených — NF = branch_building_nf_sf==NF &amp; format vyplněný &amp; nf_number je číslo</div><div id="chartFormat"></div></div>
   <div class="chart-card"><h2>Struktura sítě v čase</h2><div class="sub">Stacked columns</div><div id="chartStacked"></div></div>
   <div class="table-wrap">
     <h2>Všechny měsíční snapshoty</h2>
@@ -568,12 +620,12 @@ html = f"""<!DOCTYPE html>
       <tbody></tbody>
     </table>
   </div>
-  <div class="foot">Vygenerováno automaticky — filtr: bns_flag = "Y" · NF = nf_sf==NF + format + nf_number</div>
+  <div class="foot">Vygenerováno automaticky — filtr: bns_flag = &quot;Y&quot; · NF = nf_sf==NF + format + nf_number</div>
 </div>
 
 <div id="tabDetail" class="tab-content">
   <div class="side">
-    <div class="side-hdr"><h2>Timeline poboček</h2><p>Historie změn stavů</p></div>
+    <div class="side-hdr"><h2>Timeline pobček</h2><p>Historie změn stavů</p></div>
     <div class="search-box"><input type="text" id="searchInput" placeholder="Hledat kód nebo název…"></div>
     <div class="flt-bar">
       <button class="flt-btn active" data-filter="all">Vše</button>
@@ -585,19 +637,19 @@ html = f"""<!DOCTYPE html>
     <div class="b-list" id="branchList"></div>
   </div>
   <div class="detail" id="detailContent">
-    <div class="empty-st"><div class="arr">◀</div><p>Vyberte pobočku ze seznamu vlevo</p></div>
+    <div class="empty-st"><div class="arr">&#9664;</div><p>Vyberte pobčku ze seznamu vlevo</p></div>
   </div>
 </div>
 
 <div id="tabFormats" class="tab-content">
   <div class="ov-header">
     <h1>Adopce nových formátů (NF)</h1>
-    <p>Pobočky, které přešly na NF: branch_building_nf_sf=NF + format vyplnněný + nf_number je číslo</p>
+    <p>Pobčky, které přešly na NF: branch_building_nf_sf=NF + format vyplněný + nf_number je číslo</p>
   </div>
   <div class="kpi-row" id="fmtKpiRow"></div>
   <div class="chart-card">
-    <h2>Měsíční přírůstek poboček s NF</h2>
-    <div class="sub">Počet poboček, které v daném měsíci poprvé splňovaly všechny 3 podmínky NF (sloupce) · kumulativní součet (linie)</div>
+    <h2>Měsíční přírůstek pobček s NF</h2>
+    <div class="sub">Počet pobček, které v daném měsíci poprvé splňovaly všechny 3 podmínky NF (sloupce) · kumulativní součet (linie)</div>
     <div id="chartFmtAdoption"></div>
   </div>
   <div class="chart-card">
@@ -613,12 +665,44 @@ html = f"""<!DOCTYPE html>
         <th style="text-align:right;">Přírůstek</th>
         <th style="text-align:right;">Δ od min. měsíce</th>
         <th style="text-align:right;">Kumulativní</th>
-        <th style="text-align:left;">Pobočky (klikněte)</th>
+        <th style="text-align:left;">Pobčky (klikněte)</th>
       </tr></thead>
       <tbody id="fmtTableBody"></tbody>
     </table>
   </div>
-  <div class="foot">NF podmínky: branch_building_nf_sf = NF &amp; format vyplnněný &amp; nf_number je číslo</div>
+  <div class="foot">NF podmínky: branch_building_nf_sf = NF &amp; format vyplněný &amp; nf_number je číslo</div>
+</div>
+
+<div id="tabClosed" class="tab-content">
+  <div class="ov-header">
+    <h1>Uzavřené pobčky</h1>
+    <p>Pobčky s branch_closed = True — seřazeno od nejnovějšího uzavření</p>
+    <div class="range" id="closedCountBadge"></div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th style="text-align:left;">Datum uzavření</th>
+        <th style="text-align:left;">Kód</th>
+        <th style="text-align:left;">Název pobčky</th>
+        <th style="text-align:left;">Město</th>
+        <th style="text-align:left;">Region</th>
+        <th style="text-align:left;">Typ</th>
+      </tr></thead>
+      <tbody id="closedTableBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Kalendar modal -->
+<div id="calModal" class="modal-overlay" style="display:none;">
+  <div class="modal-box">
+    <div class="modal-hdr">
+      <h3 id="calModalTitle"></h3>
+      <button class="modal-close" id="calModalClose">&#x2715;</button>
+    </div>
+    <div id="calModalBody"></div>
+  </div>
 </div>
 
 <script>
@@ -664,18 +748,18 @@ const recentChangesByCat={recent_changes_json};
 let activeRcCat='all';
 const fldLabelsRC={{branch_name:'Název',branch_type:'Typ',branch_closed:'Zavřeno',cashless:'Cashless',format:'Formát',branch_building_nf_sf:'NF/SF',nf_number:'NF číslo',address:'Adresa',city:'Město',region:'Region'}};
 function fvRC(v){{if(v===null||v===undefined)return'—';if(v===true)return'Ano';if(v===false)return'Ne';if(v===''||v==='nan')return'—';return String(v);}}
-function escRC(s){{const d=document.createElement('div');d.textContent=s;return d.innerHTML;}}
+function esc(s){{const d=document.createElement('div');d.textContent=String(s==null?'':s);return d.innerHTML;}}
 
 function renderRecentChanges(){{
-  const shown=(recentChangesByCat[activeRcCat]||[]).slice(0,5);
+  const shown=(recentChangesByCat[activeRcCat]||[]).slice(0,10);
   const el=document.getElementById('recentChangesList');
   if(!shown.length){{el.innerHTML='<div style="color:var(--dim);font-size:0.8rem;padding:12px 0;text-align:center;">Žádné změny.</div>';return;}}
   el.innerHTML=shown.map(c=>
     '<div class="rc-item"><div class="rc-dot '+c.category+'"></div><div class="rc-body">'+
     '<div class="rc-top"><span class="rc-date">'+c.date+'</span><span class="rc-code">'+c.branch_code+'</span>'+
-    '<span class="rc-bname">'+escRC(c.branch_name)+'</span><span class="rc-evlabel">'+escRC(c.label)+'</span></div>'+
+    '<span class="rc-bname">'+esc(c.branch_name)+'</span><span class="rc-evlabel">'+esc(c.label)+'</span></div>'+
     '<div class="rc-change"><span class="fld">'+(fldLabelsRC[c.field]||c.field)+'</span>'+
-    '<span class="old">'+escRC(fvRC(c.old))+'</span><span class="arr">→</span><span class="new">'+escRC(fvRC(c.new))+'</span></div>'+
+    '<span class="old">'+esc(fvRC(c.old))+'</span><span class="arr">→</span><span class="new">'+esc(fvRC(c.new))+'</span></div>'+
     '</div></div>'
   ).join('');
 }}
@@ -684,6 +768,112 @@ document.querySelectorAll('#rcTabs .rc-tab').forEach(b=>b.addEventListener('clic
   b.classList.add('active');activeRcCat=b.dataset.cat;renderRecentChanges();
 }}));
 renderRecentChanges();
+
+/* ====== KALENDAR ====== */
+const changesByMonth={changes_by_month_json};
+const fmtData={format_monthly_json};
+const fmtByMonthMap={{}};
+fmtData.forEach(m=>{{fmtByMonthMap[m.month]=m.branches;}});
+
+const MONTH_SHORT=['Led','Úno','Bře','Dub','Kvě','Čvn','Čvc','Srp','Zář','Říj','Lis','Pro'];
+const MONTH_FULL=['Leden','Únor','Březen','Duben','Květen','Červen','červenec','Srpen','Září','Říjen','Listopad','Prosinec'];
+
+function renderCalendar(){{
+  const yearsSet=new Set();
+  history.forEach(h=>yearsSet.add(h.timestamp.substring(0,4)));
+  Object.keys(changesByMonth).forEach(m=>yearsSet.add(m.substring(0,4)));
+  Object.keys(fmtByMonthMap).forEach(m=>yearsSet.add(m.substring(0,4)));
+  const years=[...yearsSet].sort();
+
+  let html='<div class="cal-wrap"><h2>Kalendářní přehled sítě</h2>';
+  html+='<div class="sub">Kliknutím na měsíc otevřete detail událostí</div>';
+  html+='<div class="cal-legend">';
+  html+='<span><span class="cal-legend-dot" style="background:var(--red-bg);border:1.5px solid #fca5a5;"></span>Uzavřené pobčky</span>';
+  html+='<span><span class="cal-legend-dot" style="background:var(--purple-bg);border:1.5px solid #c4b5fd;"></span>NF formát přechod</span>';
+  html+='<span><span class="cal-legend-dot" style="background:linear-gradient(145deg,#fef2f2 55%,#f5f3ff 55%);border:1.5px solid #fca5a5;"></span>Obě události</span>';
+  html+='</div>';
+
+  years.forEach(yr=>{{
+    html+='<div class="cal-year"><div class="cal-year-label">'+yr+'</div><div class="cal-months">';
+    for(let mo=1;mo<=12;mo++){{
+      const mKey=yr+'-'+String(mo).padStart(2,'0');
+      const mChg=changesByMonth[mKey]||[];
+      const closures=mChg.filter(c=>c.category==='closed'&&c.new===true);
+      const nfTrans=fmtByMonthMap[mKey]||[];
+      const hasClosed=closures.length>0;
+      const hasNF=nfTrans.length>0;
+      const hasAny=hasClosed||hasNF||mChg.length>0;
+      let cls='cal-cell';
+      if(hasAny) cls+=' clickable';
+      if(hasClosed&&hasNF) cls+=' has-both';
+      else if(hasClosed) cls+=' has-closed';
+      else if(hasNF) cls+=' has-nf';
+      let inner='<div class="cal-month-name">'+MONTH_SHORT[mo-1]+'</div><div class="cal-codes">';
+      if(hasClosed){{
+        const shown=closures.slice(0,4).map(c=>c.branch_code).join(' ');
+        inner+='<div class="cc-red">✕ '+shown+(closures.length>4?' +'+(closures.length-4):'')+'</div>';
+      }}
+      if(hasNF){{
+        const shown=nfTrans.slice(0,3).map(b=>b.branch_code).join(' ');
+        inner+='<div class="cc-purple">◆ '+shown+(nfTrans.length>3?' +'+(nfTrans.length-3):'')+'</div>';
+      }}
+      inner+='</div>';
+      html+='<div class="'+cls+'"'+(hasAny?' data-month="'+mKey+'"':'')+'>'  +inner+'</div>';
+    }}
+    html+='</div></div>';
+  }});
+  html+='</div>';
+  document.getElementById('calendarSection').innerHTML=html;
+  document.getElementById('calendarSection').addEventListener('click',e=>{{
+    const cell=e.target.closest('[data-month]');
+    if(cell) openCalModal(cell.dataset.month);
+  }});
+}}
+
+function openCalModal(mKey){{
+  const yr=mKey.substring(0,4);
+  const mo=parseInt(mKey.substring(5,7),10);
+  const title=MONTH_FULL[mo-1]+' '+yr;
+  const mChg=changesByMonth[mKey]||[];
+  const closures=mChg.filter(c=>c.category==='closed');
+  const nfTrans=fmtByMonthMap[mKey]||[];
+  const cashless=mChg.filter(c=>c.category==='cashless');
+  const others=mChg.filter(c=>c.category!=='closed'&&c.category!=='cashless');
+  let body='';
+  if(closures.length){{
+    body+='<div class="modal-section"><div class="modal-stitle"><span class="ms-dot" style="background:var(--red);"></span>Uzavřené pobčky ('+closures.length+')</div>';
+    closures.forEach(c=>{{body+='<div class="modal-item"><span class="modal-code">'+c.branch_code+'</span><span class="modal-bname">'+esc(c.branch_name)+'</span><span class="modal-detail">'+esc(c.label)+'</span></div>';}});
+    body+='</div>';
+  }}
+  if(nfTrans.length){{
+    body+='<div class="modal-section"><div class="modal-stitle"><span class="ms-dot" style="background:var(--purple);"></span>Nové formáty NF ('+nfTrans.length+')</div>';
+    nfTrans.forEach(b=>{{body+='<div class="modal-item"><span class="modal-code">'+b.branch_code+'</span><span class="modal-bname">'+esc(b.branch_name)+'</span><span class="modal-detail">'+esc(b.format_new)+(b.nf_number&&b.nf_number!=='None'?' #'+esc(b.nf_number):'')+'</span></div>';}});
+    body+='</div>';
+  }}
+  if(cashless.length){{
+    body+='<div class="modal-section"><div class="modal-stitle"><span class="ms-dot" style="background:var(--orange);"></span>Cashless změny ('+cashless.length+')</div>';
+    cashless.forEach(c=>{{body+='<div class="modal-item"><span class="modal-code">'+c.branch_code+'</span><span class="modal-bname">'+esc(c.branch_name)+'</span><span class="modal-detail">'+esc(c.label)+'</span></div>';}});
+    body+='</div>';
+  }}
+  if(others.length){{
+    body+='<div class="modal-section"><div class="modal-stitle"><span class="ms-dot" style="background:var(--yellow);"></span>Ostatní změny ('+others.length+')</div>';
+    others.forEach(c=>{{body+='<div class="modal-item"><span class="modal-code">'+c.branch_code+'</span><span class="modal-bname">'+esc(c.branch_name)+'</span><span class="modal-detail">'+esc(c.label)+'</span></div>';}});
+    body+='</div>';
+  }}
+  if(!body) body='<div style="color:var(--dim);text-align:center;padding:24px;">Žádné klíčové události.</div>';
+  document.getElementById('calModalTitle').textContent=title;
+  document.getElementById('calModalBody').innerHTML=body;
+  document.getElementById('calModal').style.display='flex';
+}}
+
+function closeCalModal(){{
+  document.getElementById('calModal').style.display='none';
+}}
+document.getElementById('calModalClose').addEventListener('click',closeCalModal);
+document.getElementById('calModal').addEventListener('click',e=>{{if(e.target===document.getElementById('calModal')) closeCalModal();}});
+document.addEventListener('keydown',e=>{{if(e.key==='Escape') closeCalModal();}});
+
+renderCalendar();
 
 function renderCharts(){{
   chartsRendered=true;
@@ -775,7 +965,6 @@ function isNewFormat(st){{
   return !isNaN(parseFloat(String(nn)));
 }}
 function fv(v){{if(v===null||v===undefined)return'—';if(v===true)return'Ano';if(v===false)return'Ne';if(v===''||v==='nan')return'—';return String(v);}}
-function esc(s){{const d=document.createElement('div');d.textContent=s;return d.innerHTML;}}
 
 function filterBranches(){{
   const q=searchInput.value.toLowerCase().trim();
@@ -791,7 +980,7 @@ function filterBranches(){{
 
 function renderList(){{
   const filtered=filterBranches();
-  listCount.textContent=filtered.length+' poboček';
+  listCount.textContent=filtered.length+' pobček';
   branchList.innerHTML=filtered.map(b=>{{
     const last=b.events[b.events.length-1];
     const cls=activeCode===b.code?' active':'';
@@ -819,7 +1008,7 @@ function renderTimeline(){{
     }}
     h+='</div></div>';
   }});
-  h+='</div><div class="foot">filtr: bns_flag = "Y"</div>';
+  h+='</div><div class="foot">filtr: bns_flag = &quot;Y&quot;</div>';
   detailContent.innerHTML=h;
 }}
 
@@ -830,9 +1019,7 @@ document.querySelectorAll('.flt-btn').forEach(b=>b.addEventListener('click',()=>
 }}));
 renderList();
 
-/* ====== TAB 3 — NOVÉ FORMÁTY ====== */
-const fmtData={format_monthly_json};
-
+/* ====== TAB 3 — NOVE FORMATY ====== */
 function renderFmtCharts(){{
   fmtChartsRendered=true;
   if(!fmtData.length){{document.getElementById('fmtKpiRow').innerHTML='<div style="color:var(--dim);padding:20px;text-align:center;">Žádné přechody na NF.</div>';return;}}
@@ -843,7 +1030,7 @@ function renderFmtCharts(){{
     {{label:'Celkem přechodů',value:total,color:'var(--purple)'}},
     {{label:'Měsíců s přechody',value:fmtData.length,color:'var(--accent)'}},
     {{label:'Ø za měsíc',value:avg,color:'var(--teal)'}},
-    {{label:'Nejakt. měsíc',value:maxM.month,sub:maxM.count+' poboček',color:'var(--orange)'}},
+    {{label:'Nejakt. měsíc',value:maxM.month,sub:maxM.count+' pobček',color:'var(--orange)'}},
   ].map(k=>'<div class="kpi" style="border-top-color:'+k.color+'"><div class="value" style="color:'+k.color+';font-size:'+(String(k.value).length>6?'1.1rem':'1.6rem')+'">'+k.value+'</div><div class="label">'+k.label+'</div>'+(k.sub?'<div class="delta neutral">'+k.sub+'</div>':'')+'</div>').join('');
 
   const labels=fmtData.map(m=>m.month);
@@ -872,7 +1059,7 @@ function renderFmtCharts(){{
     yaxis:{{labels:{{style:{{fontSize:'11px'}},formatter:v=>(v>0?'+':'')+v}}}},
     dataLabels:{{enabled:fmtData.length<=18,formatter:v=>(v>0?'+':'')+v,style:{{fontSize:'10px',fontWeight:700}}}},
     annotations:{{yaxis:[{{y:0,borderColor:'#94a3b8',strokeDashArray:0,borderWidth:1}}]}},
-    tooltip:{{y:{{formatter:v=>(v>0?'+':'')+v+' poboček'}}}},
+    tooltip:{{y:{{formatter:v=>(v>0?'+':'')+v+' pobček'}}}},
     grid:{{borderColor:'#e8eaf0',strokeDashArray:3}},
   }}).render();
 
@@ -889,7 +1076,7 @@ function renderFmtCharts(){{
     ).join('');
     const tr=document.createElement('tr');
     tr.className='fmt-row-toggle';
-    tr.innerHTML='<td style="font-family:monospace;font-size:0.8rem;">'+m.month+'</td><td style="font-weight:700;color:var(--purple);">'+m.count+'</td><td><span class="delta '+dClass+'">'+dText+'</span></td><td>'+cumul+'</td><td style="text-align:left;color:var(--muted);font-size:0.75rem;">'+m.branches.slice(0,3).map(b=>'<span style="font-family:monospace;font-size:0.7rem;color:var(--accent);">'+b.branch_code+'</span>').join(' ')+(m.count>3?' <span style="color:var(--dim);">+'+( m.count-3)+' dalších</span>':'')+' <span class="expand-icon" id="icon-'+i+'">▶</span></td>';
+    tr.innerHTML='<td style="font-family:monospace;font-size:0.8rem;">'+m.month+'</td><td style="font-weight:700;color:var(--purple);">'+m.count+'</td><td><span class="delta '+dClass+'">'+dText+'</span></td><td>'+cumul+'</td><td style="text-align:left;color:var(--muted);font-size:0.75rem;">'+m.branches.slice(0,3).map(b=>'<span style="font-family:monospace;font-size:0.7rem;color:var(--accent);">'+b.branch_code+'</span>').join(' ')+(m.count>3?' <span style="color:var(--dim);">+'+(m.count-3)+' dalších</span>':'')+' <span class="expand-icon" id="icon-'+i+'">▶</span></td>';
     const trD=document.createElement('tr');
     trD.className='fmt-detail-row';trD.style.display='none';
     trD.innerHTML='<td colspan="5"><div class="fmt-detail-inner"><div class="fmt-branch-list">'+pillsHtml+'</div></div></td>';
@@ -904,6 +1091,22 @@ function renderFmtCharts(){{
 }}
 
 if(document.getElementById('tabFormats').classList.contains('active')) renderFmtCharts();
+
+/* ====== TAB 4 — UZAVRENE POBOCKY ====== */
+const closedBranches={closed_branches_json};
+document.getElementById('closedCountBadge').textContent=closedBranches.length+' uzavřených pobček';
+const cTbody=document.getElementById('closedTableBody');
+closedBranches.forEach(b=>{{
+  const tr=document.createElement('tr');
+  tr.innerHTML=
+    '<td><span class="closed-date">'+b.close_date+'</span></td>'+
+    '<td><span class="rc-code">'+b.branch_code+'</span></td>'+
+    '<td style="font-weight:600;">'+esc(b.branch_name)+'</td>'+
+    '<td>'+esc(b.city)+'</td>'+
+    '<td>'+esc(b.region)+'</td>'+
+    '<td style="color:var(--muted);font-size:0.75rem;">'+esc(b.branch_type)+'</td>';
+  cTbody.appendChild(tr);
+}});
 </script>
 </body>
 </html>"""
@@ -911,4 +1114,4 @@ if(document.getElementById('tabFormats').classList.contains('active')) renderFmt
 with open(REPORT_FILE, "w", encoding="utf-8") as f:
     f.write(html)
 
-print(f"📄 Kombinovaný report uložen: {REPORT_FILE}")
+print(f"\U0001f4c4 Kombinovaný report uložen: {REPORT_FILE}")
