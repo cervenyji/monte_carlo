@@ -227,6 +227,47 @@ recent_changes_by_cat = {
 
 print(f"\U0001f514 Změny připraveny: all={len(recent_changes_by_cat['all'])}, cashless={len(recent_changes_by_cat['cashless'])}, format={len(recent_changes_by_cat['format'])}, closed={len(recent_changes_by_cat['closed'])}")
 
+# Kraj mapping
+_KRAJ_MAP = {
+    "Praha": ["Praha","Praha 1","Praha 2","Praha 3","Praha 4","Praha 5","Praha 6","Praha 7","Praha 8","Praha 9","Praha 10","Praha 11","Praha 12","Praha 13","Praha 14","Praha 15","Praha 16","Praha 17","Praha 18","Praha 19","Praha 20","Praha 21"],
+    "Středočeský": ["Benešov","Beroun","Brandýs nad Labem","Kladno","Kolín","Kutná Hora","Mělník","Mladá Boleslav","Nymburk","Příbram","Rakovník","Říčany","Slaný","Čáslav","Dobříš","Hořovice","Kralupy nad Vltavou","Lysá nad Labem","Mnichovo Hradiště","Neratovice","Poděbrady","Vlašim"],
+    "Jihočeský": ["České Budějovice","Písek","Tábor","Strakonice","Jindřichův Hradec","Český Krumlov","Prachatice","Blatná","Dačice","Milevsko","Písek","Soběslav","Třeboň","Vimperk","Vodňany"],
+    "Plzeňský": ["Plzeň","Klatovy","Rokycany","Domažlice","Tachov","Blovice","Horažďovice","Horšovský Týn","Nepomuk","Přeštice","Stříbro","Sušice"],
+    "Karlovarský": ["Karlovy Vary","Sokolov","Cheb","Mariánské Lázně","Aš","Františkovy Lázně","Kraslice","Ostrov","Jáchymov"],
+    "Ústecký": ["Ústí nad Labem","Most","Teplice","Chomutov","Děčín","Litoměřice","Louny","Litvínov","Kadaň","Bílina","Duchcov","Jirkov","Klášterec nad Ohří","Lovosice","Roudnice nad Labem","Rumburk","Šluknov","Varnsdorf","Žatec"],
+    "Liberecký": ["Liberec","Jablonec nad Nisou","Česká Lípa","Semily","Turnov","Nový Bor","Frýdlant","Jilemnice","Tanvald","Železný Brod"],
+    "Královéhradecký": ["Hradec Králové","Jičín","Náchod","Trutnov","Rychnov nad Kněžnou","Dvůr Králové nad Labem","Broumov","Dobruška","Hořice","Jaroměř","Kostelec nad Orlicí","Nová Paka","Nové Město nad Metují","Nový Bydžov","Opočno"],
+    "Pardubický": ["Pardubice","Chrudim","Svitavy","Ústí nad Orlicí","Litomyšl","Vysoké Mýto","Česká Třebová","Hlinsko","Holice","Lanškroun","Polička","Přelouč","Skuteč"],
+    "Vysočina": ["Jihlava","Havlíčkův Brod","Žďár nad Sázavou","Třebíč","Pelhřimov","Velké Meziříčí","Bystřice nad Pernštejnem","Humpolec","Moravské Budějovice","Náměšť nad Oslavou","Nové Město na Moravě","Pacov","Telč","Tišnov","Velká Bíteš"],
+    "Jihomoravský": ["Brno","Hodonín","Znojmo","Břeclav","Vyškov","Blansko","Boskovice","Kuřim","Kyjov","Mikulov","Pohořelice","Rosice","Slavkov u Brna","Strážnice","Tišnov","Veselí nad Moravou"],
+    "Olomoucký": ["Olomouc","Přerov","Prostějov","Šumperk","Jeseník","Litovel","Mohelnice","Šternberk","Uničov","Konice","Lipník nad Bečvou","Zábřeh"],
+    "Zlínský": ["Zlín","Uherské Hradiště","Vsetín","Kroměříž","Uherský Brod","Otrokovice","Valašské Meziříčí","Holešov","Luhačovice","Napajedla","Rožnov pod Radhoštěm","Valašské Klobouky","Vizovice","Zlín"],
+    "Moravskoslezský": ["Ostrava","Opava","Karviná","Frýdek-Místek","Havířov","Orlová","Nový Jičín","Třinec","Kopřivnice","Krnov","Bohumín","Český Těšín","Bruntál","Bílovec","Frenštát pod Radhoštěm","Hlučín","Jablunkov","Rýmařov","Vítkov"],
+}
+CITY_TO_KRAJ = {}
+for _kn, _cs in _KRAJ_MAP.items():
+    for _c in _cs:
+        CITY_TO_KRAJ[_c.lower().strip()] = _kn
+
+def get_kraj(city, address=""):
+    c = city.strip().lower()
+    if c in CITY_TO_KRAJ:
+        return CITY_TO_KRAJ[c]
+    if c.startswith("praha"):
+        return "Praha"
+    if c.startswith("brno"):
+        return "Jihomoravský"
+    if c.startswith("ostrava"):
+        return "Moravskoslezský"
+    for key, kraj in CITY_TO_KRAJ.items():
+        if len(key) >= 5 and (key in c or c in key):
+            return kraj
+    addr = address.strip().lower()
+    for key, kraj in CITY_TO_KRAJ.items():
+        if len(key) >= 5 and key in addr:
+            return kraj
+    return "Neznámý"
+
 # Uzavrene pobocky
 closed_branches_data = []
 for code, bdata in branches_data.items():
@@ -242,14 +283,17 @@ for code, bdata in branches_data.items():
             if ch["field"] == "branch_closed" and ch["new"] is True:
                 close_date = evt["date"]
                 break
+    city_val = str(last_state.get("city") or "")
+    addr_val = str(last_state.get("address") or "")
     closed_branches_data.append({
         "branch_code": int(code),
         "branch_name": bdata["name"],
         "close_date": close_date,
-        "city": str(last_state.get("city") or ""),
+        "city": city_val,
         "region": str(last_state.get("region") or ""),
         "branch_type": str(last_state.get("branch_type") or ""),
-        "address": str(last_state.get("address") or ""),
+        "address": addr_val,
+        "kraj": get_kraj(city_val, addr_val),
     })
 closed_branches_data.sort(key=lambda x: x["close_date"], reverse=True)
 
@@ -329,7 +373,23 @@ history_all_json = json.dumps({"M": history_monthly, "Q": history_quarterly, "Y"
 branches_json = json.dumps(sorted_branches, ensure_ascii=False)
 recent_changes_json = json.dumps(recent_changes_by_cat, ensure_ascii=False)
 format_monthly_json = json.dumps(format_monthly_summary, ensure_ascii=False)
+def _build_closed_ts(items, key_fn):
+    by_yk = defaultdict(lambda: defaultdict(int))
+    for item in items:
+        by_yk[item["close_date"][:4]][key_fn(item)] += 1
+    years = sorted(by_yk.keys())
+    keys = sorted({k for yr_data in by_yk.values() for k in yr_data})
+    series = [{"name": k, "data": [by_yk[yr].get(k, 0) for yr in years]}
+              for k in keys if any(by_yk[yr].get(k, 0) > 0 for yr in years)]
+    return {"years": years, "series": series}
+
+closed_chart_data = {
+    "region": _build_closed_ts(closed_branches_data, lambda b: b.get("region") or "Neznámý"),
+    "kraj": _build_closed_ts(closed_branches_data, lambda b: b.get("kraj", "Neznámý")),
+}
+
 closed_branches_json = json.dumps(closed_branches_data, ensure_ascii=False)
+closed_chart_data_json = json.dumps(closed_chart_data, ensure_ascii=False)
 changes_by_month_json = json.dumps({k: v for k, v in changes_by_month_cal.items()}, ensure_ascii=False)
 
 REPORT_FILE = "branch_timeline_report.html"
@@ -679,6 +739,16 @@ html = f"""<!DOCTYPE html>
     <p>Pobčky s branch_closed = True — seřazeno od nejnovějšího uzavření</p>
     <div class="range" id="closedCountBadge"></div>
   </div>
+  <div class="chart-card" style="margin-bottom:16px;">
+    <h2>Uzavírání poboček dle regionů ČS</h2>
+    <div class="sub">Uzavřené pobočky za rok, dle interních regionů ČS</div>
+    <div id="chartClosedRegion"></div>
+  </div>
+  <div class="chart-card" style="margin-bottom:16px;">
+    <h2>Uzavírání poboček dle krajů ČR</h2>
+    <div class="sub">Uzavřené pobočky za rok, přiřazení dle města pobočky</div>
+    <div id="chartClosedKraj"></div>
+  </div>
   <div class="table-wrap">
     <table>
       <thead><tr>
@@ -706,7 +776,7 @@ html = f"""<!DOCTYPE html>
 </div>
 
 <script>
-let chartsRendered=false, fmtChartsRendered=false;
+let chartsRendered=false, fmtChartsRendered=false, closedChartsRendered=false;
 
 document.querySelectorAll('.tab-btn').forEach(btn => {{
   btn.addEventListener('click',()=>{{
@@ -716,6 +786,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {{
     document.getElementById(btn.dataset.tab).classList.add('active');
     if(btn.dataset.tab==='tabOverview'&&!chartsRendered) renderCharts();
     if(btn.dataset.tab==='tabFormats'&&!fmtChartsRendered) renderFmtCharts();
+    if(btn.dataset.tab==='tabClosed'&&!closedChartsRendered) renderClosedCharts();
   }});
 }});
 
@@ -731,7 +802,7 @@ function mkDelta(curr,old){{
   if(old===null||old===undefined) return '<span class="delta neutral">—</span>';
   const d=curr-old;
   if(d===0) return '<span class="delta neutral">beze změny</span>';
-  return '<span class="delta '+(d>0?'up':'down')+'">'+(d>0?'+':'')+d+' oproti min.</span>';
+  return '<span class="delta '+(d>0?'up':'down')+'">'+( d>0?'+':'')+d+' oproti min.</span>';
 }}
 
 document.getElementById('kpiRow').innerHTML=[
@@ -818,7 +889,7 @@ function renderCalendar(){{
         inner+='<div class="cc-purple">◆ '+shown+(nfTrans.length>3?' +'+(nfTrans.length-3):'')+'</div>';
       }}
       inner+='</div>';
-      html+='<div class="'+cls+'"'+(hasAny?' data-month="'+mKey+'"':'')+'>'  +inner+'</div>';
+      html+='<div class="'+cls+'"'+(hasAny?' data-month="'+mKey+'"':'')+'>'+inner+'</div>';
     }}
     html+='</div></div>';
   }});
@@ -934,7 +1005,7 @@ history.slice().reverse().forEach((h,i,arr)=>{{
   const dOpen=prevH?h.opened-prevH.opened:0;
   const tr=document.createElement('tr');
   if(h.is_current) tr.className='is-current';
-  tr.innerHTML='<td>'+h.label+'</td><td>'+h.total+'</td><td><strong>'+h.opened+'</strong></td><td>'+h.closed+'</td><td>'+h.cashless+'</td><td>'+h.non_cashless+'</td><td>'+h.new_format+'</td><td>'+h.old_format+'</td><td><span class="delta '+(dOpen>0?'up':dOpen<0?'down':'neutral')+'">'+(prevH?(dOpen>0?'+':'')+dOpen:'—')+'</span></td>';
+  tr.innerHTML='<td>'+h.label+'</td><td>'+h.total+'</td><td><strong>'+h.opened+'</strong></td><td>'+h.closed+'</td><td>'+h.cashless+'</td><td>'+h.non_cashless+'</td><td>'+h.new_format+'</td><td>'+h.old_format+'</td><td><span class="delta '+(dOpen>0?'up':dOpen<0?'down':'neutral')+'">'+( prevH?(dOpen>0?'+':'')+dOpen:'—')+'</span></td>';
   tbody.appendChild(tr);
 }});
 
@@ -1072,7 +1143,7 @@ function renderFmtCharts(){{
     const dClass=delta===null?'neutral':delta>0?'up':delta<0?'down':'neutral';
     const pillsHtml=m.branches.map(b=>
       '<span class="fmt-branch-pill"><span class="pcode">'+b.branch_code+'</span>'+esc(b.branch_name)+
-      '<span class="pfmt">'+esc(b.format_new)+'</span>'+(b.nf_number&&b.nf_number!=='None'&&b.nf_number!==''?'<span class="pnum">#'+esc(b.nf_number)+'</span>':'')+'</span>'
+      '<span class="pfmt">'+esc(b.format_new)+'</span>'+(b.nf_number&&b.nf_number!=='None'&&b.nf_number!==''?'<span class="pnum">#'+esc(b.nf_number)+'</span>':'')+' </span>'
     ).join('');
     const tr=document.createElement('tr');
     tr.className='fmt-row-toggle';
@@ -1093,6 +1164,30 @@ function renderFmtCharts(){{
 if(document.getElementById('tabFormats').classList.contains('active')) renderFmtCharts();
 
 /* ====== TAB 4 — UZAVRENE POBOCKY ====== */
+const closedChartData={closed_chart_data_json};
+function renderClosedCharts(){{
+  closedChartsRendered=true;
+  const KRAJ_COLORS={{'Praha':'#C0392B','Středočeský':'#D35400','Jihočeský':'#27AE60','Plzeňský':'#2471A3','Karlovarský':'#7D3C98','Ústecký':'#A93226','Liberecký':'#117A65','Královéhradecký':'#1F618D','Pardubický':'#BA4A00','Vysočina':'#1E8449','Jihomoravský':'#6C3483','Olomoucký':'#154360','Zlínský':'#0E6655','Moravskoslezský':'#744212','Neznámý':'#566573'}};
+  const REG_PAL=['#0057b8','#7c3aed','#059669','#d97706','#dc2626','#0891b2','#9c4221','#374151','#065f46','#831843','#1e3a5f','#4d7c0f','#7f1d1d','#134e4a'];
+  function mkBar(el,data,useKrajColors){{
+    if(!data||!data.years||!data.years.length) {{ document.querySelector(el).innerHTML='<p style="color:var(--muted);padding:20px;">Žádná data</p>'; return; }}
+    const cols=data.series.map((s,i)=>useKrajColors?(KRAJ_COLORS[s.name]||REG_PAL[i%REG_PAL.length]):REG_PAL[i%REG_PAL.length]);
+    new ApexCharts(document.querySelector(el),{{
+      chart:{{type:'bar',height:340,stacked:true,fontFamily:'DM Sans,sans-serif',toolbar:{{show:true}},animations:{{enabled:true,easing:'easeinout',speed:400}}}},
+      series:data.series,colors:cols,
+      xaxis:{{categories:data.years,labels:{{style:{{fontSize:'11px'}}}}}},
+      yaxis:{{labels:{{style:{{fontSize:'11px'}},formatter:v=>Math.round(v)}},min:0,title:{{text:'Uzavřené pobočky',style:{{fontSize:'11px'}}}}}},
+      plotOptions:{{bar:{{columnWidth:'55%',borderRadius:2,borderRadiusApplication:'end',borderRadiusWhenStacked:'last'}}}},
+      dataLabels:{{enabled:true,style:{{fontSize:'9px',fontWeight:700}},formatter:v=>v>0?v:'',background:{{enabled:false}}}},
+      tooltip:{{shared:true,intersect:false}},
+      legend:{{position:'top',fontSize:'11px',markers:{{width:9,height:9,radius:2}}}},
+      grid:{{borderColor:'#e8eaf0',strokeDashArray:3}},
+    }}).render();
+  }}
+  mkBar('#chartClosedRegion',closedChartData.region,false);
+  mkBar('#chartClosedKraj',closedChartData.kraj,true);
+}}
+
 const closedBranches={closed_branches_json};
 document.getElementById('closedCountBadge').textContent=closedBranches.length+' uzavřených pobček';
 const cTbody=document.getElementById('closedTableBody');
@@ -1109,7 +1204,7 @@ closedBranches.forEach(b=>{{
 }});
 </script>
 </body>
-</html>"""
+</html>"""  
 
 with open(REPORT_FILE, "w", encoding="utf-8") as f:
     f.write(html)
