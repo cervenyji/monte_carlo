@@ -619,12 +619,55 @@ html = f"""<!DOCTYPE html>
   #tabClosed {{ padding:28px 32px; max-width:1100px; margin:0 auto; }}
   .closed-date {{ font-family:'JetBrains Mono',monospace; font-size:0.78rem; font-weight:600; }}
 
+  /* Porovnani tab */
+  #tabCompare {{ padding:28px 32px; max-width:1300px; margin:0 auto; }}
+  .cmp-controls {{ background:var(--card); border:1px solid var(--border); border-radius:10px; padding:20px 24px; margin-bottom:20px; display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end; }}
+  .cmp-field {{ display:flex; flex-direction:column; gap:5px; }}
+  .cmp-field label {{ font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }}
+  .cmp-field input[type=date] {{ font-family:'DM Sans',sans-serif; font-size:0.85rem; padding:7px 11px; border:1.5px solid var(--border); border-radius:7px; background:var(--bg); color:var(--text); outline:none; cursor:pointer; }}
+  .cmp-field input[type=date]:focus {{ border-color:var(--accent); }}
+  .cmp-vs {{ font-size:0.75rem; font-weight:700; color:var(--dim); padding-bottom:9px; }}
+  .cmp-btn {{ padding:8px 22px; background:var(--accent); color:#fff; border:none; border-radius:7px; font-family:'DM Sans',sans-serif; font-size:0.85rem; font-weight:700; cursor:pointer; transition:opacity .15s; }}
+  .cmp-btn:hover {{ opacity:.88; }}
+  .cmp-summary {{ display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px; }}
+  .cmp-stat {{ background:var(--card); border:1px solid var(--border); border-radius:8px; padding:10px 18px; font-size:0.78rem; }}
+  .cmp-stat strong {{ display:block; font-size:1.1rem; font-weight:800; }}
+  .cmp-stat.added strong {{ color:var(--green); }}
+  .cmp-stat.removed strong {{ color:var(--red); }}
+  .cmp-stat.changed strong {{ color:var(--orange); }}
+  .cmp-stat.same strong {{ color:var(--dim); }}
+  .cmp-filters {{ display:flex; gap:10px; margin-bottom:12px; flex-wrap:wrap; }}
+  .cmp-filter-btn {{ padding:4px 14px; font-size:0.75rem; font-weight:600; border-radius:14px; border:1.5px solid var(--border); background:var(--bg); color:var(--muted); cursor:pointer; transition:all .14s; }}
+  .cmp-filter-btn.active {{ background:var(--accent); border-color:var(--accent); color:#fff; }}
+  .cmp-table-wrap {{ overflow-x:auto; border-radius:10px; border:1px solid var(--border); }}
+  .cmp-table {{ width:100%; border-collapse:collapse; font-size:0.78rem; }}
+  .cmp-table th {{ background:var(--bg); padding:9px 12px; text-align:left; font-size:0.68rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); white-space:nowrap; border-bottom:1.5px solid var(--border); position:sticky; top:0; z-index:2; }}
+  .cmp-table td {{ padding:7px 12px; border-bottom:1px solid var(--border-lt); vertical-align:middle; white-space:nowrap; }}
+  .cmp-table tr:last-child td {{ border-bottom:none; }}
+  .cmp-table tr:hover td {{ background:#f8f9fc; }}
+  .cmp-row-added td {{ background:#f0fdf4 !important; }}
+  .cmp-row-removed td {{ background:#fff5f5 !important; }}
+  .cmp-row-changed td {{ }}
+  .cmp-cell-changed {{ background:var(--orange-bg) !important; border-radius:3px; }}
+  .cmp-badge {{ display:inline-block; font-size:0.6rem; font-weight:700; padding:1px 7px; border-radius:9px; margin-right:5px; text-transform:uppercase; letter-spacing:.04em; }}
+  .cmp-badge.new {{ background:#dcfce7; color:#166534; }}
+  .cmp-badge.del {{ background:#fee2e2; color:#991b1b; }}
+  .cmp-badge.chg {{ background:#ffedd5; color:#92400e; }}
+  .cmp-cell-val {{ display:flex; flex-direction:column; gap:1px; }}
+  .cmp-val-old {{ font-size:0.67rem; color:var(--red); text-decoration:line-through; }}
+  .cmp-val-new {{ font-size:0.78rem; color:var(--green); font-weight:600; }}
+  .cmp-val-same {{ color:var(--text); }}
+  .bool-true {{ color:var(--green); font-weight:700; }}
+  .bool-false {{ color:var(--dim); }}
+  .cmp-code {{ font-family:'JetBrains Mono',monospace; font-size:0.7rem; font-weight:700; color:var(--accent); }}
+  .cmp-placeholder {{ text-align:center; padding:60px 20px; color:var(--dim); font-size:0.88rem; }}
+
   .foot {{ text-align:center; padding:16px; font-size:0.7rem; color:var(--dim); border-top:1px solid var(--border-lt); margin-top:20px; }}
   @media (max-width:860px) {{
     #tabDetail.active {{ grid-template-columns:1fr; }}
     .side {{ position:relative; height:auto; max-height:38vh; }}
     .detail {{ height:auto; }}
-    #tabOverview,#tabFormats,#tabClosed {{ padding:20px 16px; }}
+    #tabOverview,#tabFormats,#tabClosed,#tabCompare {{ padding:20px 16px; }}
     .cal-months {{ grid-template-columns:repeat(6,1fr); }}
   }}
 </style>
@@ -637,6 +680,7 @@ html = f"""<!DOCTYPE html>
   <button class="tab-btn" data-tab="tabDetail">Detail pobčky</button>
   <button class="tab-btn" data-tab="tabFormats">Nové formáty</button>
   <button class="tab-btn" data-tab="tabClosed">Uzavřené pobčky</button>
+  <button class="tab-btn" data-tab="tabCompare">Porovnání</button>
 </div>
 
 <div id="tabOverview" class="tab-content active">
@@ -764,6 +808,42 @@ html = f"""<!DOCTYPE html>
   </div>
 </div>
 
+<div id="tabCompare" class="tab-content">
+  <div class="ov-header">
+    <h1>Porovnání stavů sítě</h1>
+    <p>Porovnej stav pobčkové sítě mezi dvěma daty — zobrازí se všechny pobčky s vyznačenými změnami</p>
+  </div>
+  <div class="cmp-controls">
+    <div class="cmp-field">
+      <label>Datum A</label>
+      <input type="date" id="cmpDateA">
+    </div>
+    <span class="cmp-vs">→</span>
+    <div class="cmp-field">
+      <label>Datum B</label>
+      <input type="date" id="cmpDateB">
+    </div>
+    <button class="cmp-btn" id="cmpRunBtn" onclick="runComparison()">Porovnat</button>
+  </div>
+  <div id="cmpSummary" style="display:none;">
+    <div class="cmp-summary" id="cmpStats"></div>
+    <div class="cmp-filters">
+      <button class="cmp-filter-btn active" data-f="all" onclick="setCmpFilter(this,'all')">Vše</button>
+      <button class="cmp-filter-btn" data-f="changed" onclick="setCmpFilter(this,'changed')">Změněné</button>
+      <button class="cmp-filter-btn" data-f="added" onclick="setCmpFilter(this,'added')">Nové</button>
+      <button class="cmp-filter-btn" data-f="removed" onclick="setCmpFilter(this,'removed')">Zrušené</button>
+      <button class="cmp-filter-btn" data-f="same" onclick="setCmpFilter(this,'same')">Beze změny</button>
+    </div>
+    <div class="cmp-table-wrap">
+      <table class="cmp-table" id="cmpTable">
+        <thead id="cmpThead"></thead>
+        <tbody id="cmpTbody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div id="cmpPlaceholder" class="cmp-placeholder">Vyberte dvě data a klikněte na Porovnat</div>
+</div>
+
 <!-- Kalendar modal -->
 <div id="calModal" class="modal-overlay" style="display:none;">
   <div class="modal-box">
@@ -802,7 +882,7 @@ function mkDelta(curr,old){{
   if(old===null||old===undefined) return '<span class="delta neutral">—</span>';
   const d=curr-old;
   if(d===0) return '<span class="delta neutral">beze změny</span>';
-  return '<span class="delta '+(d>0?'up':'down')+'">'+( d>0?'+':'')+d+' oproti min.</span>';
+  return '<span class="delta '+(d>0?'up':'down')+'">'+(d>0?'+':'')+d+' oproti min.</span>';
 }}
 
 document.getElementById('kpiRow').innerHTML=[
@@ -889,7 +969,7 @@ function renderCalendar(){{
         inner+='<div class="cc-purple">◆ '+shown+(nfTrans.length>3?' +'+(nfTrans.length-3):'')+'</div>';
       }}
       inner+='</div>';
-      html+='<div class="'+cls+'"'+(hasAny?' data-month="'+mKey+'"':'')+'>'+inner+'</div>';
+      html+='<div class="'+cls+'"'+(hasAny?' data-month="'+mKey+'"':'')+'>'  +inner+'</div>';
     }}
     html+='</div></div>';
   }});
@@ -1005,7 +1085,7 @@ history.slice().reverse().forEach((h,i,arr)=>{{
   const dOpen=prevH?h.opened-prevH.opened:0;
   const tr=document.createElement('tr');
   if(h.is_current) tr.className='is-current';
-  tr.innerHTML='<td>'+h.label+'</td><td>'+h.total+'</td><td><strong>'+h.opened+'</strong></td><td>'+h.closed+'</td><td>'+h.cashless+'</td><td>'+h.non_cashless+'</td><td>'+h.new_format+'</td><td>'+h.old_format+'</td><td><span class="delta '+(dOpen>0?'up':dOpen<0?'down':'neutral')+'">'+( prevH?(dOpen>0?'+':'')+dOpen:'—')+'</span></td>';
+  tr.innerHTML='<td>'+h.label+'</td><td>'+h.total+'</td><td><strong>'+h.opened+'</strong></td><td>'+h.closed+'</td><td>'+h.cashless+'</td><td>'+h.non_cashless+'</td><td>'+h.new_format+'</td><td>'+h.old_format+'</td><td><span class="delta '+(dOpen>0?'up':dOpen<0?'down':'neutral')+'">'+(prevH?(dOpen>0?'+':'')+dOpen:'—')+'</span></td>';
   tbody.appendChild(tr);
 }});
 
@@ -1143,7 +1223,7 @@ function renderFmtCharts(){{
     const dClass=delta===null?'neutral':delta>0?'up':delta<0?'down':'neutral';
     const pillsHtml=m.branches.map(b=>
       '<span class="fmt-branch-pill"><span class="pcode">'+b.branch_code+'</span>'+esc(b.branch_name)+
-      '<span class="pfmt">'+esc(b.format_new)+'</span>'+(b.nf_number&&b.nf_number!=='None'&&b.nf_number!==''?'<span class="pnum">#'+esc(b.nf_number)+'</span>':'')+' </span>'
+      '<span class="pfmt">'+esc(b.format_new)+'</span>'+(b.nf_number&&b.nf_number!=='None'&&b.nf_number!==''?'<span class="pnum">#'+esc(b.nf_number)+'</span>':'')+'</span>'
     ).join('');
     const tr=document.createElement('tr');
     tr.className='fmt-row-toggle';
@@ -1202,9 +1282,116 @@ closedBranches.forEach(b=>{{
     '<td style="color:var(--muted);font-size:0.75rem;">'+esc(b.branch_type)+'</td>';
   cTbody.appendChild(tr);
 }});
+
+/* ====== TAB 5 — POROVNANI ====== */
+(function(){{
+  /* Init date pickers from event data */
+  const allDates=[];
+  branches.forEach(b=>b.events.forEach(e=>allDates.push(e.date)));
+  allDates.sort();
+  const minDate=allDates[0]||'2000-01-01';
+  const todayISO=new Date().toISOString().slice(0,10);
+  document.getElementById('cmpDateA').min=minDate;
+  document.getElementById('cmpDateA').max=todayISO;
+  document.getElementById('cmpDateA').value=minDate;
+  document.getElementById('cmpDateB').min=minDate;
+  document.getElementById('cmpDateB').max=todayISO;
+  document.getElementById('cmpDateB').value=todayISO;
+}})();
+
+const CMP_COLS=['branch_name','branch_type','branch_closed','cashless','format','branch_building_nf_sf','nf_number','address','city','region'];
+const CMP_LABELS={{'branch_name':'Název','branch_type':'Typ','branch_closed':'Uzavřena','cashless':'Cashless','format':'Formát','branch_building_nf_sf':'NF/SF','nf_number':'NF číslo','address':'Adresa','city':'Město','region':'Region'}};
+
+let _cmpRows=[], _cmpFilter='all';
+
+function getStateAt(branch, dateISO){{
+  /* Return state of branch at dateISO (last event on or before date) */
+  const evts=branch.events.filter(e=>e.date<=dateISO);
+  if(!evts.length) return null;
+  return evts[evts.length-1].state;
+}}
+
+function runComparison(){{
+  const dA=document.getElementById('cmpDateA').value;
+  const dB=document.getElementById('cmpDateB').value;
+  if(!dA||!dB) {{ alert('Vyber obě data'); return; }}
+  const rows=[];
+  const allCodes=new Set(branches.map(b=>b.code));
+  branches.forEach(b=>{{
+    const sA=getStateAt(b,dA);
+    const sB=getStateAt(b,dB);
+    if(!sA&&!sB) return;
+    let kind='same';
+    if(!sA) kind='added';
+    else if(!sB) kind='removed';
+    else {{
+      const diff=CMP_COLS.some(c=>JSON.stringify(sA[c])!==JSON.stringify(sB[c]));
+      if(diff) kind='changed';
+    }}
+    rows.push({{code:b.code,name:b.name,sA,sB,kind}});
+  }});
+  _cmpRows=rows;
+  _cmpFilter='all';
+  document.querySelectorAll('.cmp-filter-btn').forEach(b=>b.classList.toggle('active',b.dataset.f==='all'));
+  renderCmpTable();
+  /* Summary */
+  const cnt={{'added':0,'removed':0,'changed':0,'same':0}};
+  rows.forEach(r=>cnt[r.kind]++);
+  document.getElementById('cmpStats').innerHTML=
+    '<div class="cmp-stat added"><strong>'+cnt.added+'</strong> Nové pobočky</div>'+
+    '<div class="cmp-stat removed"><strong>'+cnt.removed+'</strong> Zrušené pobočky</div>'+
+    '<div class="cmp-stat changed"><strong>'+cnt.changed+'</strong> Změněné pobočky</div>'+
+    '<div class="cmp-stat same"><strong>'+cnt.same+'</strong> Beze změny</div>';
+  document.getElementById('cmpSummary').style.display='block';
+  document.getElementById('cmpPlaceholder').style.display='none';
+}}
+
+function setCmpFilter(btn,f){{
+  _cmpFilter=f;
+  document.querySelectorAll('.cmp-filter-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  renderCmpTable();
+}}
+
+function fmtVal(v){{
+  if(v===null||v===undefined) return '<span style="color:var(--dim)">—</span>';
+  if(v===true) return '<span class="bool-true">✓</span>';
+  if(v===false) return '<span class="bool-false">✗</span>';
+  return esc(String(v));
+}}
+
+function renderCmpTable(){{
+  const filtered=_cmpFilter==='all'?_cmpRows:_cmpRows.filter(r=>r.kind===_cmpFilter);
+  const thead=document.getElementById('cmpThead');
+  const tbody=document.getElementById('cmpTbody');
+  thead.innerHTML='<tr><th>Kód</th><th>Status</th>'+CMP_COLS.map(c=>'<th>'+esc(CMP_LABELS[c]||c)+'</th>').join('')+'</tr>';
+  tbody.innerHTML='';
+  filtered.forEach(r=>{{
+    const tr=document.createElement('tr');
+    tr.className='cmp-row-'+r.kind;
+    const badge=r.kind==='added'?'<span class="cmp-badge new">Nová</span>':
+                 r.kind==='removed'?'<span class="cmp-badge del">Zrušena</span>':
+                 r.kind==='changed'?'<span class="cmp-badge chg">Změna</span>':'';
+    let cells='<td><span class="cmp-code">'+r.code+'</span></td><td>'+badge+'</td>';
+    CMP_COLS.forEach(col=>{{
+      const vA=r.sA?r.sA[col]:undefined;
+      const vB=r.sB?r.sB[col]:undefined;
+      const diff=r.kind!=='added'&&r.kind!=='removed'&&JSON.stringify(vA)!==JSON.stringify(vB);
+      if(diff){{
+        cells+='<td class="cmp-cell-changed"><div class="cmp-cell-val"><span class="cmp-val-old">'+fmtVal(vA)+'</span><span class="cmp-val-new">'+fmtVal(vB)+'</span></div></td>';
+      }} else {{
+        const v=r.sB?r.sB[col]:(r.sA?r.sA[col]:undefined);
+        cells+='<td><span class="cmp-val-same">'+fmtVal(v)+'</span></td>';
+      }}
+    }});
+    tr.innerHTML=cells;
+    tbody.appendChild(tr);
+  }});
+  if(!filtered.length) tbody.innerHTML='<tr><td colspan="'+(CMP_COLS.length+2)+'" style="text-align:center;padding:40px;color:var(--dim);">Žádné pobočky pro zvolený filtr</td></tr>';
+}}
 </script>
 </body>
-</html>"""  
+</html>"""
 
 with open(REPORT_FILE, "w", encoding="utf-8") as f:
     f.write(html)
