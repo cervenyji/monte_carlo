@@ -392,6 +392,58 @@ closed_branches_json = json.dumps(closed_branches_data, ensure_ascii=False)
 closed_chart_data_json = json.dumps(closed_chart_data, ensure_ascii=False)
 changes_by_month_json = json.dumps({k: v for k, v in changes_by_month_cal.items()}, ensure_ascii=False)
 
+# Cashless transitions with running %
+def get_branch_state_at(bdata, date_str):
+    state = None
+    for evt in bdata["events"]:
+        if evt["date"] <= date_str:
+            state = evt["state"]
+        else:
+            break
+    return state
+
+cashless_transitions = []
+for _code, _bdata in branches_data.items():
+    for _evt in _bdata["events"]:
+        for _ch in _evt.get("changes", []):
+            if _ch["field"] == "cashless" and _ch["new"] is True:
+                cashless_transitions.append({
+                    "date": _evt["date"],
+                    "branch_code": int(_code),
+                    "branch_name": _bdata["name"],
+                    "city": str(_evt["state"].get("city") or ""),
+                    "region": str(_evt["state"].get("region") or ""),
+                })
+cashless_transitions.sort(key=lambda x: x["date"])
+
+print(f"💳 Cashless přechodů: {len(cashless_transitions)} — výpočet % probíhá...")
+for _ct in cashless_transitions:
+    _open = 0; _cash = 0
+    for _c2, _b2 in branches_data.items():
+        _st = get_branch_state_at(_b2, _ct["date"])
+        if _st is None: continue
+        if not _st.get("branch_closed", False):
+            _open += 1
+            if _st.get("cashless") is True: _cash += 1
+    _ct["open_count"] = _open
+    _ct["cashless_count"] = _cash
+    _ct["pct"] = round(100 * _cash / _open, 1) if _open > 0 else 0
+
+# Timeline events 2024-2026
+timeline_data = {}
+for _ch in all_changes:
+    _yr = _ch["date"][:4]
+    if _yr not in ("2024", "2025", "2026"): continue
+    if _ch["category"] not in ("cashless", "closed", "format"): continue
+    _mk = _ch["date"][:7]
+    if _yr not in timeline_data: timeline_data[_yr] = {}
+    if _mk not in timeline_data[_yr]: timeline_data[_yr][_mk] = []
+    timeline_data[_yr][_mk].append(_ch)
+
+cashless_transitions_json = json.dumps(cashless_transitions, ensure_ascii=False)
+timeline_data_json = json.dumps(timeline_data, ensure_ascii=False)
+print(f"📅 Timeline: {sum(len(v) for v in timeline_data.values())} měsíců s událostmi")
+
 REPORT_FILE = "branch_timeline_report.html"
 apex_script_tag = (
     "<script>" + _apex_js + "</script>"
@@ -619,6 +671,40 @@ html = f"""<!DOCTYPE html>
   #tabClosed {{ padding:28px 32px; max-width:1100px; margin:0 auto; }}
   .closed-date {{ font-family:'JetBrains Mono',monospace; font-size:0.78rem; font-weight:600; }}
 
+  /* Cashless tab */
+  #tabCashless {{ padding:28px 32px; max-width:1200px; margin:0 auto; }}
+  .cl-pct-bar {{ height:6px; background:var(--border-lt); border-radius:3px; margin-top:3px; }}
+  .cl-pct-fill {{ height:100%; border-radius:3px; background:var(--orange); transition:width .4s; }}
+  .cl-pct-val {{ font-size:0.75rem; font-weight:700; color:var(--orange); }}
+
+  /* Timeline tab */
+  #tabTimeline {{ padding:28px 32px; max-width:1400px; margin:0 auto; }}
+  .tl-year-block {{ margin-bottom:40px; }}
+  .tl-year-title {{ font-size:1.1rem; font-weight:800; color:var(--accent); margin-bottom:18px; letter-spacing:-.02em; }}
+  .tl-track {{ position:relative; overflow-x:auto; padding-bottom:4px; }}
+  .tl-spine {{ display:flex; align-items:flex-start; gap:0; min-width:max-content; }}
+  .tl-month-col {{ display:flex; flex-direction:column; align-items:center; min-width:90px; position:relative; }}
+  .tl-month-col::before {{ content:''; position:absolute; top:16px; left:0; right:0; height:2px; background:var(--border); z-index:0; }}
+  .tl-month-col:first-child::before {{ left:50%; }}
+  .tl-month-col:last-child::before {{ right:50%; }}
+  .tl-dot-wrap {{ position:relative; z-index:1; display:flex; flex-direction:column; align-items:center; gap:4px; margin-bottom:8px; }}
+  .tl-dot {{ width:14px; height:14px; border-radius:50%; border:2.5px solid var(--border); background:var(--card); flex-shrink:0; }}
+  .tl-dot.has-events {{ border-color:var(--accent); background:var(--accent); box-shadow:0 0 0 3px var(--accent-lt); cursor:pointer; }}
+  .tl-dot.has-closed {{ background:var(--red); border-color:var(--red); box-shadow:0 0 0 3px var(--red-bg); }}
+  .tl-dot.has-cashless {{ background:var(--orange); border-color:var(--orange); box-shadow:0 0 0 3px var(--orange-bg); }}
+  .tl-dot.has-multi {{ background:linear-gradient(135deg,var(--red) 50%,var(--orange) 50%); border-color:var(--red); }}
+  .tl-dot.has-nf {{ background:var(--purple); border-color:var(--purple); box-shadow:0 0 0 3px var(--purple-bg); }}
+  .tl-month-lbl {{ font-size:0.62rem; font-weight:700; color:var(--dim); text-align:center; white-space:nowrap; }}
+  .tl-month-events {{ padding:6px 4px 0; width:88px; }}
+  .tl-chip {{ display:inline-flex; align-items:center; gap:3px; font-size:0.58rem; padding:1px 5px; border-radius:8px; margin:1px 0; white-space:nowrap; max-width:84px; overflow:hidden; text-overflow:ellipsis; font-weight:600; }}
+  .tl-chip.cashless {{ background:var(--orange-bg); color:var(--orange); }}
+  .tl-chip.closed {{ background:var(--red-bg); color:var(--red); }}
+  .tl-chip.format {{ background:var(--purple-bg); color:var(--purple); }}
+  .tl-chip-code {{ font-family:monospace; font-weight:700; }}
+  .tl-more {{ font-size:0.58rem; color:var(--dim); margin-top:1px; text-align:center; }}
+  .tl-legend {{ display:flex; gap:14px; margin-bottom:16px; flex-wrap:wrap; font-size:0.72rem; color:var(--muted); align-items:center; }}
+  .tl-leg-dot {{ width:10px; height:10px; border-radius:50%; display:inline-block; margin-right:4px; }}
+
   /* Porovnani tab */
   #tabCompare {{ padding:28px 32px; max-width:1300px; margin:0 auto; }}
   .cmp-controls {{ background:var(--card); border:1px solid var(--border); border-radius:10px; padding:20px 24px; margin-bottom:20px; display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end; }}
@@ -667,7 +753,7 @@ html = f"""<!DOCTYPE html>
     #tabDetail.active {{ grid-template-columns:1fr; }}
     .side {{ position:relative; height:auto; max-height:38vh; }}
     .detail {{ height:auto; }}
-    #tabOverview,#tabFormats,#tabClosed,#tabCompare {{ padding:20px 16px; }}
+    #tabOverview,#tabFormats,#tabClosed,#tabCompare,#tabCashless,#tabTimeline {{ padding:20px 16px; }}
     .cal-months {{ grid-template-columns:repeat(6,1fr); }}
   }}
 </style>
@@ -680,6 +766,8 @@ html = f"""<!DOCTYPE html>
   <button class="tab-btn" data-tab="tabDetail">Detail pobčky</button>
   <button class="tab-btn" data-tab="tabFormats">Nové formáty</button>
   <button class="tab-btn" data-tab="tabClosed">Uzavřené pobčky</button>
+  <button class="tab-btn" data-tab="tabCashless">Přechod na cashless</button>
+  <button class="tab-btn" data-tab="tabTimeline">Timeline 2024–2026</button>
   <button class="tab-btn" data-tab="tabCompare">Porovnání</button>
 </div>
 
@@ -808,6 +896,48 @@ html = f"""<!DOCTYPE html>
   </div>
 </div>
 
+<div id="tabCashless" class="tab-content">
+  <div class="ov-header">
+    <h1>Přechod poboček na cashless</h1>
+    <p>Pobočky seřazené dle data přechodu na bezhotovostní provoz · průběžné % z otevřených poboček</p>
+    <div class="range" id="cashlessCountBadge"></div>
+  </div>
+  <div class="kpi-row" id="cashlessKpiRow"></div>
+  <div class="chart-card" style="margin-bottom:16px;">
+    <h2>Podíl cashless poboček v čase</h2>
+    <div class="sub">% bezhotovostních poboček z celkového počtu otevřených — po každém přechodu</div>
+    <div id="chartCashlessPct"></div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th style="text-align:left;">Datum přechodu</th>
+        <th style="text-align:left;">Kód</th>
+        <th style="text-align:left;">Název pobočky</th>
+        <th style="text-align:left;">Město</th>
+        <th style="text-align:left;">Region</th>
+        <th style="text-align:right;">Cashless</th>
+        <th style="text-align:right;">Otevřených</th>
+        <th style="text-align:right;">% cashless</th>
+      </tr></thead>
+      <tbody id="cashlessTableBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<div id="tabTimeline" class="tab-content">
+  <div class="ov-header">
+    <h1>Timeline změn 2024–2026</h1>
+    <p>Chronologický přehled přechodů na cashless, uzavření poboček a změn formátu NF/SF po měsících</p>
+  </div>
+  <div class="tl-legend">
+    <span><span class="tl-leg-dot" style="background:var(--red);"></span>Uzavření pobočky</span>
+    <span><span class="tl-leg-dot" style="background:var(--orange);"></span>Cashless přechod</span>
+    <span><span class="tl-leg-dot" style="background:var(--purple);"></span>Změna formátu NF/SF</span>
+  </div>
+  <div id="timelineContent"></div>
+</div>
+
 <div id="tabCompare" class="tab-content">
   <div class="ov-header">
     <h1>Porovnání stavů sítě</h1>
@@ -856,7 +986,7 @@ html = f"""<!DOCTYPE html>
 </div>
 
 <script>
-let chartsRendered=false, fmtChartsRendered=false, closedChartsRendered=false;
+let chartsRendered=false, fmtChartsRendered=false, closedChartsRendered=false, cashlessChartsRendered=false, timelineRendered=false;
 
 document.querySelectorAll('.tab-btn').forEach(btn => {{
   btn.addEventListener('click',()=>{{
@@ -867,6 +997,8 @@ document.querySelectorAll('.tab-btn').forEach(btn => {{
     if(btn.dataset.tab==='tabOverview'&&!chartsRendered) renderCharts();
     if(btn.dataset.tab==='tabFormats'&&!fmtChartsRendered) renderFmtCharts();
     if(btn.dataset.tab==='tabClosed'&&!closedChartsRendered) renderClosedCharts();
+    if(btn.dataset.tab==='tabCashless'&&!cashlessChartsRendered) renderCashlessTab();
+    if(btn.dataset.tab==='tabTimeline'&&!timelineRendered) renderTimeline();
   }});
 }});
 
@@ -1283,7 +1415,107 @@ closedBranches.forEach(b=>{{
   cTbody.appendChild(tr);
 }});
 
-/* ====== TAB 5 — POROVNANI ====== */
+/* ====== TAB 5 — CASHLESS ====== */
+const cashlessTransitions={cashless_transitions_json};
+function renderCashlessTab(){{
+  cashlessChartsRendered=true;
+  const last=cashlessTransitions[cashlessTransitions.length-1];
+  const first=cashlessTransitions[0];
+  document.getElementById('cashlessCountBadge').textContent=cashlessTransitions.length+' poboček přešlo na cashless';
+  document.getElementById('cashlessKpiRow').innerHTML=[
+    {{label:'Cashless pobočky',value:last?last.cashless_count:0,color:'var(--orange)'}},
+    {{label:'Otevřených celkem',value:last?last.open_count:0,color:'var(--green)'}},
+    {{label:'% cashless (aktuální)',value:last?(last.pct+'%'):'-',color:'var(--orange)'}},
+    {{label:'1. cashless přechod',value:first?first.date:'-',color:'var(--dim)'}},
+  ].map(k=>'<div class="kpi" style="border-top-color:'+k.color+'"><div class="value" style="color:'+k.color+';font-size:'+(String(k.value).length>6?'1.1rem':'1.6rem')+'">'+k.value+'</div><div class="label">'+k.label+'</div></div>').join('');
+
+  if(cashlessTransitions.length>0){{
+    new ApexCharts(document.querySelector('#chartCashlessPct'),{{
+      chart:{{type:'area',height:280,fontFamily:'DM Sans,sans-serif',toolbar:{{show:true}},animations:{{enabled:true,easing:'easeinout',speed:500}}}},
+      series:[{{name:'% cashless',data:cashlessTransitions.map(c=>c.pct)}}],
+      colors:['#d97706'],
+      fill:{{type:'gradient',gradient:{{shadeIntensity:1,opacityFrom:0.35,opacityTo:0.05,stops:[0,100]}}}},
+      stroke:{{width:2.5,curve:'stepline'}},
+      xaxis:{{categories:cashlessTransitions.map(c=>c.date),labels:{{rotate:-45,style:{{fontSize:'9px'}},formatter:v=>v.slice(0,7)}},tickAmount:Math.min(cashlessTransitions.length,24)}},
+      yaxis:{{min:0,max:100,labels:{{formatter:v=>v+'%',style:{{fontSize:'11px'}}}},title:{{text:'% cashless',style:{{fontSize:'11px'}}}}}},
+      dataLabels:{{enabled:false}},
+      tooltip:{{x:{{formatter:(_,{{dataPointIndex}})=>cashlessTransitions[dataPointIndex]?.date}},y:{{formatter:v=>v+'% ('+cashlessTransitions[Math.min(dataPointIndex,cashlessTransitions.length-1)]?.cashless_count+'/'+cashlessTransitions[Math.min(dataPointIndex,cashlessTransitions.length-1)]?.open_count+')'}}}},
+      markers:{{size:cashlessTransitions.length<=40?4:0}},
+      grid:{{borderColor:'#e8eaf0',strokeDashArray:3}},
+      annotations:{{yaxis:[{{y:50,borderColor:'#94a3b8',strokeDashArray:4,label:{{text:'50%',style:{{fontSize:'10px',color:'#94a3b8',background:'transparent'}}}}}}]}},
+    }}).render();
+  }}
+
+  const tbody=document.getElementById('cashlessTableBody');
+  cashlessTransitions.slice().reverse().forEach(c=>{{
+    const pctColor=c.pct>=75?'var(--green)':c.pct>=50?'var(--orange)':'var(--red)';
+    const tr=document.createElement('tr');
+    tr.innerHTML=
+      '<td><span class="closed-date">'+c.date+'</span></td>'+
+      '<td><span class="rc-code">'+c.branch_code+'</span></td>'+
+      '<td style="font-weight:600;">'+esc(c.branch_name)+'</td>'+
+      '<td>'+esc(c.city)+'</td>'+
+      '<td>'+esc(c.region)+'</td>'+
+      '<td style="text-align:right;font-variant-numeric:tabular-nums;">'+c.cashless_count+'</td>'+
+      '<td style="text-align:right;font-variant-numeric:tabular-nums;">'+c.open_count+'</td>'+
+      '<td style="text-align:right;"><span style="font-weight:700;color:'+pctColor+';">'+c.pct+'%</span>'+
+        '<div class="cl-pct-bar"><div class="cl-pct-fill" style="width:'+c.pct+'%;background:'+pctColor+';"></div></div></td>';
+    tbody.appendChild(tr);
+  }});
+}}
+
+/* ====== TAB 6 — TIMELINE ====== */
+const timelineData={timeline_data_json};
+function renderTimeline(){{
+  timelineRendered=true;
+  const MONTH_SHORT=['Led','Úno','Bře','Dub','Kvě','Čvn','Čvc','Srp','Zář','Říj','Lis','Pro'];
+  const el=document.getElementById('timelineContent');
+  const years=['2024','2025','2026'];
+  let html='';
+  years.forEach(yr=>{{
+    const yData=timelineData[yr]||{{}};
+    const hasAny=Object.keys(yData).length>0;
+    html+='<div class="tl-year-block"><div class="tl-year-title">'+yr+'</div>';
+    if(!hasAny){{ html+='<div style="color:var(--dim);font-size:0.8rem;padding:8px 0;">Žádné události</div>'; html+='</div>'; return; }}
+    html+='<div class="tl-track"><div class="tl-spine">';
+    for(let mo=1;mo<=12;mo++){{
+      const mk=yr+'-'+String(mo).padStart(2,'0');
+      const evts=yData[mk]||[];
+      const hasClosed=evts.some(e=>e.category==='closed');
+      const hasCashless=evts.some(e=>e.category==='cashless');
+      const hasFormat=evts.some(e=>e.category==='format');
+      let dotCls='tl-dot';
+      if(evts.length>0){{
+        const cats=new Set(evts.map(e=>e.category));
+        if(cats.size>1) dotCls+=' has-multi';
+        else if(hasClosed) dotCls+=' has-closed';
+        else if(hasCashless) dotCls+=' has-cashless';
+        else if(hasFormat) dotCls+=' has-nf';
+        else dotCls+=' has-events';
+      }}
+      html+='<div class="tl-month-col"><div class="tl-dot-wrap"><div class="'+dotCls+'"></div></div>';
+      html+='<div class="tl-month-lbl">'+MONTH_SHORT[mo-1]+'</div>';
+      if(evts.length>0){{
+        html+='<div class="tl-month-events">';
+        const groups={{'closed':evts.filter(e=>e.category==='closed'),'cashless':evts.filter(e=>e.category==='cashless'),'format':evts.filter(e=>e.category==='format')}};
+        Object.entries(groups).forEach(([cat,items])=>{{
+          if(!items.length) return;
+          const shown=items.slice(0,3);
+          shown.forEach(e=>{{
+            html+='<div class="tl-chip '+cat+'"><span class="tl-chip-code">'+e.branch_code+'</span></div>';
+          }});
+          if(items.length>3) html+='<div class="tl-more">+'+(items.length-3)+'</div>';
+        }});
+        html+='</div>';
+      }} else {{ html+='<div class="tl-month-events"></div>'; }}
+      html+='</div>';
+    }}
+    html+='</div></div></div>';
+  }});
+  el.innerHTML=html;
+}}
+
+/* ====== TAB 7 — POROVNANI (compare) ====== */
 (function(){{
   /* Init date pickers from event data */
   const allDates=[];
